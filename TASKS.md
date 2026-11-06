@@ -97,12 +97,12 @@ Trello: *[Mural] Mural filtrado*, *Enviar/Editar/Cancelar proposta*, *[Back] End
 
 ## Etapa 6 — Comparação, transferência, aprovação e WhatsApp
 
-- [ ] `GET /chamados/:id/propostas` (ADMIN, SINDICO): prestador com `mediaAvaliacao`, `totalAvaliacoes`, `totalServicos`; `alertaPoucasPropostas` (< 3); `arquivos` de cada proposta (URL assinada)
-- [ ] `POST /chamados/:id/transferir` (ADMIN) → `TRANSFERIDA`, chamado `AGUARDANDO_APROVACAO`
-- [ ] `POST /chamados/:id/aprovar` (SINDICO) → `ACEITA`, **demais `RECUSADA` de uma vez**, chamado `EM_EXECUCAO`, evento marco
-- [ ] `POST /chamados/:id/reprovar` (SINDICO, só a `TRANSFERIDA`; `motivo` opcional) → proposta `RECUSADA` + `motivo_recusa`, chamado volta para `ABERTO`, evento `REPROVADA` (marco) — feedback do professor
-- [ ] `GET /chamados/:id/whatsapp` → `{ url }` `wa.me` com mensagem pronta
-- [ ] Respostas de transferir/aprovar/reprovar/concluir/cancelar devolvem o `Chamado` atualizado (o front usa o retorno)
+- [x] `GET /ordens/:id/propostas` (gestores): prestador com `mediaAvaliacao`, `totalAvaliacoes`, `totalServicos`, `emiteNotaFiscal`; `arquivos` com URL assinada. O aviso de < 3 propostas é calculado no front a partir de `totalPropostas`
+- [x] `POST /ordens/:id/transferir` (ADMIN) → `TRANSFERIDA`, ordem `AGUARDANDO_APROVACAO`; condomínio sem aprovador → 409 `ADMINISTRADORA_APROVA`
+- [x] `POST /ordens/:id/aprovar` (aprovador do condomínio; sem aprovador, a administradora direto de `ABERTO`) → `ACEITA`, demais `RECUSADA` de uma vez, `EM_EXECUCAO`, marco; senão 403 `NAO_E_APROVADOR`
+- [x] `POST /ordens/:id/reprovar` (aprovador, só a `TRANSFERIDA`, `motivo` opcional) → `RECUSADA` + `motivo_recusa`, ordem volta para `ABERTO`, marco
+- [x] `GET /ordens/:id/whatsapp` → `{ url }` `wa.me` com mensagem pronta (409 `SEM_PROPOSTA_APROVADA` antes da aprovação)
+- [x] Transferir/aprovar/reprovar/cancelar devolvem a `Ordem` atualizada
 
 Trello: *[Seleção] Comparar*, *Aceitar proposta vencedora*, *Gerar link de WhatsApp*, *[Chamados] Indicador de poucas propostas*, *[Back] Endpoint de aceite + WhatsApp* (vira transferir + aprovar), *[Back] Lógica de poucas propostas*.
 
