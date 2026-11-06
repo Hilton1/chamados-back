@@ -13,7 +13,7 @@ describe("GET /api/health", () => {
   });
 
   it("devolve o formato de erro padrão em rota inexistente", async () => {
-    const res = await request(criarApp()).get("/api/nao-existe");
+    const res = await request(criarApp()).get("/nao-existe");
     expect(res.status).toBe(404);
     expect(res.body.erro.codigo).toBe("ROTA_NAO_ENCONTRADA");
   });
