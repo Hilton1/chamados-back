@@ -15,7 +15,7 @@ const conflito = (codigo: string, msg: string) => new AppError(409, codigo, msg)
 const naoEncontrado = () => new AppError(404, "NAO_ENCONTRADO", "Prestador não encontrado.");
 
 /** Serviços concluídos (ordem CONCLUIDO com a proposta dele ACEITA), por prestador. */
-async function totaisServicos(ids: string[]) {
+export async function totaisServicos(ids: string[]) {
   const linhas = await prisma.proposta.groupBy({
     by: ["prestadorId"],
     where: { prestadorId: { in: ids }, status: "ACEITA", ordem: { status: "CONCLUIDO" } },

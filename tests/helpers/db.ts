@@ -132,3 +132,56 @@ export async function criarPrestador(o: PrestadorOpts = {}) {
     include: { usuario: true },
   });
 }
+
+interface OrdemOpts {
+  condominioId: string;
+  criadoPorId: string;
+  categoriaIds: string[];
+  perfilCriador?: "ADMIN" | "SINDICO" | "FISCAL" | "ZELADOR";
+  status?: "ABERTO" | "AGUARDANDO_APROVACAO" | "EM_EXECUCAO" | "CONCLUIDO" | "CANCELADO";
+  urgencia?: "NORMAL" | "URGENTE";
+  exigeNotaFiscal?: boolean;
+  /** Horas até o fim do prazo de propostas (negativo = já encerrado). */
+  prazoHoras?: number;
+  titulo?: string;
+}
+
+/** Ordem de serviço gravada direto (para montar cenários em qualquer situação). */
+export async function criarOrdem(o: OrdemOpts) {
+  const i = n();
+  return prisma.ordem.create({
+    data: {
+      condominioId: o.condominioId,
+      criadoPorId: o.criadoPorId,
+      perfilCriador: o.perfilCriador ?? "ADMIN",
+      titulo: o.titulo ?? `Ordem ${i}`,
+      descricao: "Descrição do problema",
+      local: "Bloco A",
+      urgencia: o.urgencia ?? "NORMAL",
+      status: o.status ?? "ABERTO",
+      exigeNotaFiscal: o.exigeNotaFiscal ?? false,
+      prazoPropostasAte: new Date(Date.now() + (o.prazoHoras ?? 48) * 3_600_000),
+      categorias: { create: o.categoriaIds.map((categoriaId) => ({ categoriaId })) },
+    },
+  });
+}
+
+export async function criarProposta(o: {
+  ordemId: string;
+  prestadorId: string;
+  valor?: number;
+  status?: "ENVIADA" | "TRANSFERIDA" | "ACEITA" | "RECUSADA" | "CANCELADA";
+  tempoExecucaoHoras?: number;
+  disponivelEm?: Date;
+}) {
+  return prisma.proposta.create({
+    data: {
+      ordemId: o.ordemId,
+      prestadorId: o.prestadorId,
+      valor: o.valor ?? 500,
+      disponivelEm: o.disponivelEm ?? new Date(Date.now() + 24 * 3_600_000),
+      tempoExecucaoHoras: o.tempoExecucaoHoras ?? 4,
+      status: o.status ?? "ENVIADA",
+    },
+  });
+}

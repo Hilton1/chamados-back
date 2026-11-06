@@ -13,3 +13,10 @@ vi.mock("../src/lib/clerk.js", () => ({
     (globalThis as { __emailsClerk?: Map<string, string> }).__emailsClerk?.get(id)?.toLowerCase() ??
     null,
 }));
+
+// Dublê do storage: arquivos ficam em memória (tests/helpers/storage.ts); caminhos reais.
+vi.mock("../src/lib/storage/index.js", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../src/lib/storage/index.js")>();
+  const { storageFalso } = await import("./helpers/storage.js");
+  return { ...real, storage: () => storageFalso };
+});

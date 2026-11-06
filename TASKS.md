@@ -59,15 +59,15 @@ Trello: todos os cards *[Auth]* e *[Back] Endpoints de cadastro e login…* — 
 
 Trello: *[Prestadores] Aprovar ou bloquear*, *[Prestadores] Busca/filtro*, *[Back] Endpoints de aprovação/bloqueio*, *[Back] Endpoints de busca/filtro*, *[Back] Endpoint "emite nota fiscal"*, *[Front] Tela de aprovação/bloqueio*, *[Front] Tela de listagem de prestadores*.
 
-## Etapa 3 — Chamados (núcleo) e LGPD
+## Etapa 3 — Ordens de serviço (núcleo) e LGPD
 
-- [ ] Máquina de estados (`src/modules/chamados/estado.ts`): transições válidas + evento na mesma transação
-- [ ] `POST /chamados`: ZELADOR só `limpeza`, TI só ADMIN, condomínio dentro do escopo; `prazoPropostasAte` = +48 h (NORMAL) ou `prazoUrgenteHoras` (URGENTE, padrão 2 h **(PO)**); evento `ABERTO` (marco)
-- [ ] `GET /chamados` paginado `{ itens, total }` com `page`, `pageSize`, `busca`, `categoriaId`, `situacao`; urgentes primeiro; cada item com `totalPropostas`, `menorValor`, `valorContratado`
-- [ ] `GET /chamados/:id`: `localizacao` filtrada por perfil (prestador não aprovado → coordenadas com 2 casas, sem endereço), `eventos`, `comprovacoes`, `minhaProposta` para prestador
-- [ ] `PATCH /chamados/:id/cancelar` e `/concluir` (ADMIN, SINDICO)
-- [ ] Escopo LGPD em **todos** os services (SINDICO/FISCAL: condomínios vinculados; ZELADOR: só os que abriu) + testes de vazamento entre condomínios
-- [ ] **(front)** `listChamados` passar a enviar `page/pageSize/situacao/categoriaId` e ler `{ itens, total }` (hoje espera array e pagina no cliente)
+- [x] Máquina de estados (`src/modules/ordens/estado.ts`): transições válidas, atualização condicional (`WHERE status = de`, 409 `ORDEM_ALTERADA` em corrida) + evento na mesma transação
+- [x] `POST /ordens`: vários tipos (`categoriaIds`), `zelador_pode_abrir`, `interna` só ADMIN, condomínio ativo e no escopo; prazo +48 h (NORMAL) ou `prazoUrgenteHoras` (URGENTE, padrão 2 h **(PO)**); evento `ABERTO` (marco)
+- [x] `GET /ordens` com `status`, `urgencia`, `categoriaId`, `busca` (título, local ou número); urgentes primeiro; `totalPropostas`, `menorValor`, `valorContratado`. **Devolve array** (o front pagina no cliente: `listOrdens` em services.ts)
+- [x] `GET /ordens/:id`: visão por perfil (prestador não aprovado → sem nome/endereço do condomínio, sem local, coordenadas com 2 casas), `eventos`, anexos com URL assinada, `minhaProposta`
+- [x] `PATCH /ordens/:id/cancelar` (gestores)
+- [x] Escopo LGPD (`ordens.escopo.ts`): SINDICO/FISCAL do condomínio; ZELADOR as que abriu + as do condomínio em que é aprovador; fora do escopo → 404. Testes de vazamento entre condomínios
+- [ ] **(front, opcional)** paginação no servidor (`{ itens, total }`) quando a lista crescer
 
 Trello: *[Chamados] Criar chamado*, *Listar e filtrar*, *Encerrar ou cancelar*, *Tratamento de urgência* (sem notificação), *Prazo de propostas por urgência*, *[Infra] LGPD*, *[Back] Endpoints CRUD de chamados*, *[Back] Middleware LGPD* (vira filtro no service, não tenant no JWT), *[Back] Lógica de urgência*, *[Back] Lógica de prazo*.
 
