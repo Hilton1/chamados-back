@@ -71,16 +71,17 @@ Trello: *[Prestadores] Aprovar ou bloquear*, *[Prestadores] Busca/filtro*, *[Bac
 
 Trello: *[Chamados] Criar chamado*, *Listar e filtrar*, *Encerrar ou cancelar*, *Tratamento de urgência* (sem notificação), *Prazo de propostas por urgência*, *[Infra] LGPD*, *[Back] Endpoints CRUD de chamados*, *[Back] Middleware LGPD* (vira filtro no service, não tenant no JWT), *[Back] Lógica de urgência*, *[Back] Lógica de prazo*.
 
-## Etapa 4 — Anexos (fotos, formulário e comprovação)
+## Etapa 4 — Anexos (fotos, formulário, comprovação, nota fiscal e pagamento)
 
-- [ ] Middleware de upload (`multer` em memória, 5 MB) + checagem por **magic bytes** (`file-type`) com a lista de tipos de cada `TipoAnexo` (mesma regra do CHECK `anexos_mime_por_tipo_chk`)
-- [ ] `POST /chamados/:id/anexos` (quem abriu; JPG/PNG; máx. 6 por chamado)
-- [ ] `POST /chamados/:id/formularios` (quem abriu, enquanto `ABERTO` e sem propostas; PDF/DOCX/XLSX) — feedback do professor
-- [ ] `POST /chamados/:id/comprovacoes` (só prestador da proposta `ACEITA`, chamado `EM_EXECUCAO`/`CONCLUIDO`; JPG/PNG/PDF) + evento `COMPROVACAO_ENVIADA`
-- [ ] URLs assinadas no `GET /chamados/:id` (`fotos: string[]`, `formularios[].url`, `comprovacoes[].url`) e no mural (prestador baixa o formulário)
-- [ ] Se o banco falhar depois do upload, remover o arquivo (evita órfãos)
-- [ ] Criar projeto Supabase de dev + bucket `anexos` e testar de ponta a ponta
-- [ ] **(front)** comprimir imagens antes de enviar (ex.: 1600 px, JPEG 80%) — adia a necessidade de storage pago
+- [x] Middleware de upload (`src/middlewares/upload.ts`: `multer` em memória, 5 MB) + checagem por **magic bytes** (`file-type`) com os tipos de cada `TipoAnexo` (mesma regra do CHECK `anexos_mime_por_tipo_chk`); erros 413 `ARQUIVO_GRANDE`, 415 `TIPO_DE_ARQUIVO_INVALIDO`
+- [x] `POST /ordens/:id/anexos` (quem abriu; JPG/PNG; máx. 6; enquanto `ABERTO`)
+- [x] `POST /ordens/:id/formularios` (quem abriu, menos zelador; antes da 1ª proposta; PDF/DOCX/XLSX; máx. 3)
+- [x] `POST /ordens/:id/comprovacoes` e `/notas-fiscais` (prestador da proposta `ACEITA`; JPG/PNG/PDF) + eventos `COMPROVACAO_ENVIADA` / `NOTA_FISCAL_ENVIADA`
+- [x] `PATCH /ordens/:id/concluir` (multipart `comprovantes`, gestores): 409 `NOTA_FISCAL_PENDENTE` / `PAGAMENTO_PENDENTE`; evento `CONCLUIDO` (marco)
+- [x] URLs assinadas no `GET /ordens/:id` (`fotos`, `formularios`, `notasFiscais`, `comprovantesPagamento`, `comprovacoes`, `arquivos` das propostas); arquivo ausente no bucket não derruba a resposta
+- [x] Se o banco falhar depois do upload, remove o arquivo (`src/modules/anexos/arquivos.ts`)
+- [x] Supabase de dev (bucket `anexos-dev`) testado de ponta a ponta (upload, URL assinada, remoção)
+- [ ] **(front)** comprimir imagens antes de enviar (ex.: 1600 px, JPEG 80%)
 - [ ] **(front)** exibir as fotos reais (hoje hachurado "foto N")
 
 Trello: *[Chamados] Upload de fotos*, *[Back] Endpoint de upload de foto* (rota final é `/anexos`, 1 arquivo por requisição).
