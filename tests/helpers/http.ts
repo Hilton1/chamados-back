@@ -18,3 +18,10 @@ export function como(clerkId: string, perfil?: string) {
 }
 
 export const anonimo = () => request(app);
+
+/** Requisição crua autenticada (para multipart: `.field()` / `.attach()`). */
+export function bruto(clerkId: string, metodo: "post" | "patch", url: string, perfil?: string) {
+  const r = request(app)[metodo](`/api${url}`).set("Authorization", `Bearer ${clerkId}`);
+  if (perfil) r.set("X-Perfil", perfil);
+  return r;
+}

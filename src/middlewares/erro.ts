@@ -33,8 +33,13 @@ export const tratarErro: ErrorRequestHandler = (err, req, res, _next) => {
     return;
   }
   if (err instanceof MulterError) {
-    const status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
-    res.status(status).json({ erro: { codigo: err.code, mensagem: err.message } });
+    const [status, codigo, mensagem] =
+      err.code === "LIMIT_FILE_SIZE"
+        ? [413, "ARQUIVO_GRANDE", "Cada arquivo pode ter até 5 MB."]
+        : err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE"
+          ? [400, "ARQUIVOS_DEMAIS", "Arquivos demais ou em campo inesperado."]
+          : [400, err.code, err.message];
+    res.status(status).json({ erro: { codigo, mensagem } });
     return;
   }
   (req.log ?? logger).error({ err }, "erro não tratado");

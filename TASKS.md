@@ -87,11 +87,11 @@ Trello: *[Chamados] Upload de fotos*, *[Back] Endpoint de upload de foto* (rota 
 
 ## Etapa 5 — Mural e propostas (prestador)
 
-- [ ] `GET /mural`: só `APROVADO`, chamados `ABERTO` dentro do prazo, das suas categorias; sem endereço/condomínio; urgentes no topo
-- [ ] `POST /chamados/:id/propostas` (**upsert**: cria ou edita a proposta do prestador; decidido para o front não mudar): `multipart/form-data`; valor > 0, `disponivelEm`, `tempoExecucaoHoras` obrigatórios; recusa após o prazo; evento `PROPOSTA_RECEBIDA` (3ª proposta = marco)
-- [ ] Se o chamado tem formulário: exigir ≥ 1 arquivo (`anexos.tipo = PROPOSTA`, JPG/PNG/PDF/DOCX/XLSX) — novo ou já enviado antes — senão 409 `FORMULARIO_OBRIGATORIO`; tudo na mesma transação (arquivo removido do storage se a gravação falhar)
-- [ ] `PATCH /propostas/:id/cancelar`, só antes de `TRANSFERIDA/ACEITA`
-- [ ] `GET /propostas/minhas` (em andamento / aguardando / encerradas)
+- [x] `GET /mural`: só `APROVADO` e ativo; ordens `ABERTO` no prazo com **qualquer** tipo que ele atende; sem nome/endereço do condomínio nem local; urgentes no topo
+- [x] `POST /ordens/:id/propostas` (**upsert**, `multipart/form-data`): valor > 0, `disponivelEm`, `tempoExecucaoHoras`; recusa após o prazo (`PRAZO_ENCERRADO`) e fora do `ABERTO` (`PROPOSTAS_ENCERRADAS`); proposta transferida/aceita/reprovada não é editada (`PROPOSTA_BLOQUEADA`); evento ao receber/reenviar (3ª proposta = marco)
+- [x] Formulário: se a ordem tem, exige ≥ 1 arquivo (`PROPOSTA`) novo ou já enviado (cancelada não conta) → senão 409 `FORMULARIO_OBRIGATORIO`; arquivo removido do storage se a gravação falhar
+- [x] `PATCH /propostas/:id/cancelar`, só `ENVIADA` (atualização condicional) + evento
+- [x] `GET /propostas/minhas` (ordens com proposta dele, visão do prestador); o detalhe do serviço é o próprio `GET /ordens/:id`
 
 Trello: *[Mural] Mural filtrado*, *Enviar/Editar/Cancelar proposta*, *[Back] Endpoints CRUD de propostas*, *[Back] Endpoint de mural*.
 
