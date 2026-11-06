@@ -1,17 +1,24 @@
-// Modelo de dados — Plataforma de Chamados de Condomínio (backend)
-// Prisma 6. Em produção (Supabase): DATABASE_URL = pooler (porta 6543, ?pgbouncer=true),
-// DIRECT_URL = conexão direta (porta 5432), usada pelas migrations.
+// Modelo de dados — CondoCheck (API). Prisma 6.
+// Em produção (Supabase): DATABASE_URL = pooler (porta 6543, ?pgbouncer=true),
+// DIRECT_URL = Session pooler (porta 5432), usada pelas migrations.
+//
+// Vocabulário: "ordem de serviço" (model Ordem, tabela ordens_servico), "prestador de serviço",
+// "tipo de serviço" (model Categoria). Contrato das respostas: front/types/index.ts.
 //
 // Regras que o Prisma não expressa (estão em SQL na migration inicial):
 //   - avaliacoes.nota entre 1 e 5; propostas.valor > 0; propostas.tempo_execucao_horas > 0
 //   - anexos.tamanho_bytes <= 5 MB
-//   - tipo de arquivo por tipo de anexo (anexos_mime_por_tipo_chk):
-//       ABERTURA    → JPG/PNG              (fotos de quem abriu)
-//       COMPROVACAO → JPG/PNG/PDF          (prestador aprovado comprova o serviço)
-//       FORMULARIO  → PDF/DOCX/XLSX        (quem abriu anexa para o prestador preencher)
-//       PROPOSTA    → JPG/PNG/PDF/DOCX/XLSX (prestador devolve o formulário preenchido junto da proposta)
+//   - tipo de arquivo por tipo de anexo (anexos_mime_por_tipo_chk), igual a front/lib/arquivos.ts:
+//       ABERTURA    → JPG/PNG                (fotos de quem abriu)
+//       FORMULARIO  → PDF/DOCX/XLSX          (quem abriu anexa para o prestador preencher)
+//       PROPOSTA    → JPG/PNG/PDF/DOCX/XLSX  (prestador devolve o formulário preenchido com a proposta)
+//       COMPROVACAO → JPG/PNG/PDF            (prestador aprovado comprova o serviço; opcional)
+//       NOTA_FISCAL → JPG/PNG/PDF            (prestador aprovado; obrigatória se ordens_servico.exige_nota_fiscal)
+//       PAGAMENTO   → JPG/PNG/PDF            (comprovante de pagamento; obrigatório para concluir)
 //   - anexo PROPOSTA exige proposta_id; os demais tipos não podem ter (anexos_proposta_chk)
-//   - no máximo 1 proposta TRANSFERIDA/ACEITA por chamado (índice único parcial)
+//   - no máximo 1 proposta TRANSFERIDA/ACEITA por ordem de serviço (índice único parcial)
+//   - prestadores.documento só dígitos (11 ou 14); usuarios.email sempre minúsculo
+//   (aprovar prestador exige emite_nota_fiscal = true: regra do service, não CHECK — ele pode deixar de emitir depois)
 
 generator client {
   provider = "prisma-client-js"
@@ -25,47 +32,64 @@ datasource db {
 
 // ───────── Enums ─────────
 
+/// Perfil ativo de quem usa o sistema. ADMIN = equipe da administradora (usuarios.administradora);
+/// SINDICO/FISCAL/ZELADOR vêm do vínculo com cada condomínio; PRESTADOR = tem linha em prestadores.
 enum Perfil {
-  ADMIN // administradora (acesso global)
+  ADMIN
   SINDICO
   FISCAL
   ZELADOR
   PRESTADOR
 }
 
+/// Perfis que dependem de condomínio (um por condomínio, em vinculos_condominio).
+enum PerfilCondominio {
+  SINDICO
+  FISCAL
+  ZELADOR
+}
+
+/// PENDENTE = autocadastro esperando a administradora. Desativar é à parte (prestadores.ativo).
 enum StatusPrestador {
   PENDENTE
   APROVADO
-  BLOQUEADO
+}
+
+enum OrigemPrestador {
+  AUTOCADASTRO // criou a conta e preencheu o cadastro; entra PENDENTE
+  ADMINISTRADORA // cadastrado pela administradora; já entra APROVADO
 }
 
 enum Urgencia {
   NORMAL // propostas abertas por até 48 h
-  URGENTE // atendimento imediato
+  URGENTE // atendimento imediato; prazo definido na abertura
 }
 
-enum StatusChamado {
+enum StatusOrdem {
   ABERTO // recebendo propostas
-  AGUARDANDO_APROVACAO // admin transferiu uma proposta; síndico decide
-  EM_EXECUCAO // síndico aprovou; contato via WhatsApp
-  CONCLUIDO
+  AGUARDANDO_APROVACAO // administradora transferiu uma proposta; o aprovador do condomínio decide
+  EM_EXECUCAO // aprovada; contato via WhatsApp; NF (se exigida) e comprovação
+  CONCLUIDO // concluída com comprovante de pagamento
   CANCELADO
 }
 
 enum TipoAnexo {
-  ABERTURA // fotos de quem abriu o chamado
-  FORMULARIO // formulário anexado na abertura para o prestador preencher e devolver com a proposta
-  PROPOSTA // arquivo enviado pelo prestador junto da proposta (ex.: formulário preenchido)
-  COMPROVACAO // fotos/arquivos enviados por quem atendeu, para comprovar o serviço (opcional)
+  ABERTURA
+  FORMULARIO
+  PROPOSTA
+  COMPROVACAO
+  NOTA_FISCAL
+  PAGAMENTO
 }
 
 enum TipoEvento {
   ABERTO
-  PROPOSTA_RECEBIDA
+  PROPOSTA_RECEBIDA // também usado para "prestador cancelou a proposta"
   TRANSFERIDA
   APROVADA
-  REPROVADA // síndico reprovou a proposta transferida; chamado volta para ABERTO
+  REPROVADA // aprovador reprovou a proposta transferida; ordem volta para ABERTO
   COMPROVACAO_ENVIADA
+  NOTA_FISCAL_ENVIADA
   CONCLUIDO
   CANCELADO
   AVALIADO
@@ -73,99 +97,120 @@ enum TipoEvento {
 
 enum StatusProposta {
   ENVIADA
-  TRANSFERIDA // transferida pela administradora ao síndico
-  ACEITA // aprovada pelo síndico
-  RECUSADA // reprovada pelo síndico ou recusada automaticamente quando outra foi aprovada
-  CANCELADA // cancelada pelo prestador
+  TRANSFERIDA // transferida pela administradora para aprovação
+  ACEITA // aprovada
+  RECUSADA // reprovada pelo aprovador ou recusada automaticamente quando outra foi aprovada
+  CANCELADA // cancelada pelo prestador (pode reenviar enquanto o prazo estiver aberto)
 }
 
-// ───────── Tenancy / usuários ─────────
+// ───────── Condomínios e pessoas ─────────
 
 model Condominio {
-  id        String   @id @default(uuid()) @db.Uuid
-  nome      String
-  cnpj      String?  @unique
-  endereco  String
-  bairro    String
-  cidade    String
-  uf        String   @db.Char(2)
-  // Mapa do local. Preenchidas por geocodificação no cadastro (ou manualmente). Nulas = sem mapa.
-  latitude  Decimal? @db.Decimal(9, 6)
-  longitude Decimal? @db.Decimal(9, 6)
-  ativo     Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id          String   @id @default(uuid()) @db.Uuid
+  nome        String
+  cnpj        String?  @unique // só dígitos
+  endereco    String
+  bairro      String
+  cidade      String
+  uf          String   @db.Char(2)
+  // Mapa do local. Geocodificação no cadastro ou preenchimento manual. Nulas = sem mapa.
+  latitude    Decimal? @db.Decimal(9, 6)
+  longitude   Decimal? @db.Decimal(9, 6)
+  ativo       Boolean  @default(true) // inativo não aparece para abrir ordem de serviço
+  // Quem aprova/reprova as propostas. null = a própria administradora.
+  // Precisa ser pessoa ativa vinculada a este condomínio (validado no service).
+  aprovadorId String?  @map("aprovador_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
-  vinculos VinculoCondominio[]
-  chamados Chamado[]
+  aprovador Usuario?            @relation("CondominioAprovador", fields: [aprovadorId], references: [id], onDelete: SetNull)
+  vinculos  VinculoCondominio[]
+  ordens    Ordem[]
 
   @@map("condominios")
 }
 
+/// Toda conta do sistema: pessoas (administradora, síndico, fiscal, zelador) e prestadores.
+/// Pré-cadastro pela administradora com clerk_user_id = null; no 1º login o vínculo é feito pelo
+/// e-mail verificado no Clerk. contaCriada (front) = clerk_user_id preenchido.
 model Usuario {
-  id          String   @id @default(uuid()) @db.Uuid
-  clerkUserId String?  @unique @map("clerk_user_id") // null até o 1º login de quem foi pré-cadastrado
-  nome        String
-  email       String   @unique
-  telefone    String?
-  perfil      Perfil
-  ativo       Boolean  @default(true)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(uuid()) @db.Uuid
+  clerkUserId    String?  @unique @map("clerk_user_id")
+  nome           String // pessoa: nome; prestador: nome de quem atende (nomeContato no front)
+  email          String   @unique // sempre minúsculo
+  telefone       String? // E.164 sem "+", ex.: 5582999990001 (convite por WhatsApp)
+  administradora Boolean  @default(false) // faz parte da equipe da administradora (perfil ADMIN)
+  ativo          Boolean  @default(true) // soft delete: desativado não entra (GET /me → 403)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   vinculos              VinculoCondominio[]
+  condominiosAprovador  Condominio[]        @relation("CondominioAprovador")
   prestador             Prestador?          @relation("PrestadorUsuario")
-  prestadoresAprov      Prestador[]         @relation("PrestadorAprovadoPor")
-  chamadosCriados       Chamado[]           @relation("ChamadoCriadoPor")
-  chamadosAprovados     Chamado[]           @relation("ChamadoAprovadoPor")
+  prestadoresAprovados  Prestador[]         @relation("PrestadorAprovadoPor")
+  ordensCriadas         Ordem[]             @relation("OrdemCriadaPor")
+  ordensAprovadas       Ordem[]             @relation("OrdemAprovadaPor")
+  ordensConcluidas      Ordem[]             @relation("OrdemConcluidaPor")
+  ordensCanceladas      Ordem[]             @relation("OrdemCanceladaPor")
   propostasTransferidas Proposta[]          @relation("PropostaTransferidaPor")
   avaliacoes            Avaliacao[]
   anexosEnviados        Anexo[]
-  eventos               ChamadoEvento[]
+  eventos               OrdemEvento[]
 
   @@map("usuarios")
 }
 
-// Escopo LGPD: SINDICO/FISCAL/ZELADOR só enxergam os condomínios vinculados. ADMIN não precisa de vínculo.
+/// Perfil da pessoa em cada condomínio (um por condomínio). Define o escopo LGPD:
+/// SINDICO/FISCAL/ZELADOR só enxergam os condomínios em que têm vínculo. ADMIN vê todos.
 model VinculoCondominio {
-  usuarioId    String @map("usuario_id") @db.Uuid
-  condominioId String @map("condominio_id") @db.Uuid
+  usuarioId    String           @map("usuario_id") @db.Uuid
+  condominioId String           @map("condominio_id") @db.Uuid
+  perfil       PerfilCondominio
+  createdAt    DateTime         @default(now()) @map("created_at")
 
   usuario    Usuario    @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
   condominio Condominio @relation(fields: [condominioId], references: [id], onDelete: Cascade)
 
   @@id([usuarioId, condominioId])
+  @@index([condominioId])
   @@map("vinculos_condominio")
 }
 
-// ───────── Catálogo ─────────
+// ───────── Tipos de serviço e prestadores ─────────
 
+/// Tipo de serviço (Elétrica, Piscina…), cadastrado pela administradora.
 model Categoria {
-  id      String  @id @default(uuid()) @db.Uuid
-  slug    String  @unique // eletrica, hidraulica, limpeza, infraestrutura, ti
-  nome    String
-  interna Boolean @default(false) // TI = uso interno da administradora
-  ativa   Boolean @default(true)
+  id               String   @id @default(uuid()) @db.Uuid
+  slug             String   @unique
+  nome             String   @unique
+  interna          Boolean  @default(false) @map("interna") // só a administradora abre (ex.: TI); fora do autocadastro
+  zeladorPodeAbrir Boolean  @default(false) @map("zelador_pode_abrir")
+  ativa            Boolean  @default(true) // inativa some das escolhas, mas continua nas ordens antigas
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
-  chamados    Chamado[]
+  ordens      OrdemCategoria[]
   prestadores PrestadorCategoria[]
 
   @@map("categorias")
 }
 
+/// Cadastro do prestador. O e-mail e o nome do contato ficam em `usuarios` (a conta).
 model Prestador {
   id               String          @id @default(uuid()) @db.Uuid
   usuarioId        String          @unique @map("usuario_id") @db.Uuid
   razaoSocial      String          @map("razao_social")
-  documento        String          @unique // CNPJ ou CPF
-  telefoneWhatsapp String          @map("telefone_whatsapp") // E.164, ex.: +5582999999999
+  documento        String          @unique // CNPJ (14) ou CPF (11), só dígitos
+  telefoneWhatsapp String          @map("telefone_whatsapp") // E.164 sem "+", ex.: 5582999990001
   emiteNotaFiscal  Boolean         @map("emite_nota_fiscal")
   areaAtuacao      String          @map("area_atuacao")
   status           StatusPrestador @default(PENDENTE)
+  origem           OrigemPrestador @default(AUTOCADASTRO)
+  ativo            Boolean         @default(true) // desativar/reativar (soft delete); some do mural e das buscas
+  motivoInativacao String?         @map("motivo_inativacao")
   aprovadoPorId    String?         @map("aprovado_por_id") @db.Uuid
   aprovadoEm       DateTime?       @map("aprovado_em")
-  motivoBloqueio   String?         @map("motivo_bloqueio")
-  // desnormalizados, atualizados na mesma transação que grava a avaliação
+  // Desnormalizados: atualizados na mesma transação que grava a avaliação / conclui a ordem.
   mediaAvaliacao   Decimal         @default(0) @map("media_avaliacao") @db.Decimal(3, 2)
   totalAvaliacoes  Int             @default(0) @map("total_avaliacoes")
   createdAt        DateTime        @default(now()) @map("created_at")
@@ -177,7 +222,7 @@ model Prestador {
   propostas   Proposta[]
   avaliacoes  Avaliacao[]
 
-  @@index([status])
+  @@index([status, ativo])
   @@map("prestadores")
 }
 
@@ -189,120 +234,142 @@ model PrestadorCategoria {
   categoria Categoria @relation(fields: [categoriaId], references: [id])
 
   @@id([prestadorId, categoriaId])
+  @@index([categoriaId])
   @@map("prestador_categorias")
 }
 
-// ───────── Chamados ─────────
+// ───────── Ordens de serviço ─────────
 
-model Chamado {
-  id                 String        @id @default(uuid()) @db.Uuid
-  numero             Int           @unique @default(autoincrement()) // protocolo legível
-  condominioId       String        @map("condominio_id") @db.Uuid
-  categoriaId        String        @map("categoria_id") @db.Uuid
-  criadoPorId        String        @map("criado_por_id") @db.Uuid
+model Ordem {
+  id                 String      @id @default(uuid()) @db.Uuid
+  numero             Int         @unique @default(autoincrement()) // protocolo legível (#101); sequência começa em 101
+  condominioId       String      @map("condominio_id") @db.Uuid
+  criadoPorId        String      @map("criado_por_id") @db.Uuid
+  perfilCriador      Perfil      @map("perfil_criador") // perfil ativo de quem abriu (criadoPor.perfil no front)
   titulo             String
-  descricao          String        @db.Text
+  descricao          String      @db.Text
   local              String // bloco/unidade/área comum
-  urgencia           Urgencia      @default(NORMAL)
-  status             StatusChamado @default(ABERTO)
-  prazoPropostasAte  DateTime      @map("prazo_propostas_ate") // NORMAL: criação + 48h; URGENTE: definido na abertura
-  aprovadoPorId      String?       @map("aprovado_por_id") @db.Uuid
-  aprovadoEm         DateTime?     @map("aprovado_em")
-  concluidoEm        DateTime?     @map("concluido_em")
-  canceladoEm        DateTime?     @map("cancelado_em")
-  motivoCancelamento String?       @map("motivo_cancelamento")
-  createdAt          DateTime      @default(now()) @map("created_at")
-  updatedAt          DateTime      @updatedAt @map("updated_at")
+  urgencia           Urgencia    @default(NORMAL)
+  status             StatusOrdem @default(ABERTO)
+  prazoPropostasAte  DateTime    @map("prazo_propostas_ate") // NORMAL: criação + 48 h; URGENTE: definido na abertura
+  exigeNotaFiscal    Boolean     @default(false) @map("exige_nota_fiscal") // se sim, só conclui com NOTA_FISCAL anexada
+  aprovadoPorId      String?     @map("aprovado_por_id") @db.Uuid
+  aprovadoEm         DateTime?   @map("aprovado_em")
+  concluidoPorId     String?     @map("concluido_por_id") @db.Uuid
+  concluidoEm        DateTime?   @map("concluido_em")
+  canceladoPorId     String?     @map("cancelado_por_id") @db.Uuid
+  canceladoEm        DateTime?   @map("cancelado_em")
+  motivoCancelamento String?     @map("motivo_cancelamento")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
 
-  condominio  Condominio      @relation(fields: [condominioId], references: [id])
-  categoria   Categoria       @relation(fields: [categoriaId], references: [id])
-  criadoPor   Usuario         @relation("ChamadoCriadoPor", fields: [criadoPorId], references: [id])
-  aprovadoPor Usuario?        @relation("ChamadoAprovadoPor", fields: [aprovadoPorId], references: [id])
-  anexos      Anexo[]
-  eventos     ChamadoEvento[]
-  propostas   Proposta[]
-  avaliacao   Avaliacao?
+  condominio   Condominio       @relation(fields: [condominioId], references: [id])
+  criadoPor    Usuario          @relation("OrdemCriadaPor", fields: [criadoPorId], references: [id])
+  aprovadoPor  Usuario?         @relation("OrdemAprovadaPor", fields: [aprovadoPorId], references: [id])
+  concluidoPor Usuario?         @relation("OrdemConcluidaPor", fields: [concluidoPorId], references: [id])
+  canceladoPor Usuario?         @relation("OrdemCanceladaPor", fields: [canceladoPorId], references: [id])
+  categorias   OrdemCategoria[]
+  anexos       Anexo[]
+  eventos      OrdemEvento[]
+  propostas    Proposta[]
+  avaliacao    Avaliacao?
 
   @@index([condominioId, status])
-  @@index([categoriaId, status])
+  @@index([criadoPorId])
   @@index([status, urgencia, prazoPropostasAte])
-  @@map("chamados")
+  @@map("ordens_servico")
+}
+
+/// Uma ordem de serviço pode envolver vários tipos de serviço. O mural mostra a ordem a quem atende
+/// QUALQUER um deles.
+model OrdemCategoria {
+  ordemId     String @map("ordem_id") @db.Uuid
+  categoriaId String @map("categoria_id") @db.Uuid
+
+  ordem     Ordem     @relation(fields: [ordemId], references: [id], onDelete: Cascade)
+  categoria Categoria @relation(fields: [categoriaId], references: [id])
+
+  @@id([ordemId, categoriaId])
+  @@index([categoriaId])
+  @@map("ordem_categorias")
 }
 
 model Anexo {
   id           String    @id @default(uuid()) @db.Uuid
-  chamadoId    String    @map("chamado_id") @db.Uuid
+  ordemId      String    @map("ordem_id") @db.Uuid
   propostaId   String?   @map("proposta_id") @db.Uuid // só no tipo PROPOSTA
-  tipo         TipoAnexo @default(ABERTURA)
+  tipo         TipoAnexo
   enviadoPorId String    @map("enviado_por_id") @db.Uuid
   nomeOriginal String    @map("nome_original")
-  storagePath  String    @map("storage_path") // caminho no bucket privado do Supabase Storage
-  mimeType     String    @map("mime_type") // tipos aceitos variam por `tipo` (ver topo do arquivo)
+  storagePath  String    @map("storage_path") // caminho no bucket privado (ordens/{id}/{tipo}/…)
+  mimeType     String    @map("mime_type")
   tamanhoBytes Int       @map("tamanho_bytes")
   createdAt    DateTime  @default(now()) @map("created_at")
 
-  chamado    Chamado   @relation(fields: [chamadoId], references: [id], onDelete: Cascade)
+  ordem      Ordem     @relation(fields: [ordemId], references: [id], onDelete: Cascade)
   proposta   Proposta? @relation(fields: [propostaId], references: [id], onDelete: Cascade)
   enviadoPor Usuario   @relation(fields: [enviadoPorId], references: [id])
 
-  @@index([chamadoId, tipo])
+  @@index([ordemId, tipo])
   @@index([propostaId])
   @@map("anexos")
 }
 
-// Linha do tempo do chamado. Gravada pelos services nas mesmas transações das mudanças de estado.
-// `marco` = evento de destaque na tela (abertura, mínimo de propostas atingido, aprovação, reprovação, conclusão).
-model ChamadoEvento {
+/// Linha do tempo. Gravada pelos services nas mesmas transações das mudanças de estado.
+/// `marco` = destaque na tela (abertura, 3ª proposta, aprovação, reprovação, conclusão, cancelamento).
+model OrdemEvento {
   id        String     @id @default(uuid()) @db.Uuid
-  chamadoId String     @map("chamado_id") @db.Uuid
+  ordemId   String     @map("ordem_id") @db.Uuid
   tipo      TipoEvento
   autorId   String?    @map("autor_id") @db.Uuid // null quando o autor é o sistema
   texto     String
   marco     Boolean    @default(false)
   createdAt DateTime   @default(now()) @map("created_at")
 
-  chamado Chamado  @relation(fields: [chamadoId], references: [id], onDelete: Cascade)
-  autor   Usuario? @relation(fields: [autorId], references: [id])
+  ordem Ordem    @relation(fields: [ordemId], references: [id], onDelete: Cascade)
+  autor Usuario? @relation(fields: [autorId], references: [id])
 
-  @@index([chamadoId, createdAt])
-  @@map("chamado_eventos")
+  @@index([ordemId, createdAt])
+  @@map("ordem_eventos")
 }
 
 model Proposta {
   id                 String         @id @default(uuid()) @db.Uuid
-  chamadoId          String         @map("chamado_id") @db.Uuid
+  ordemId            String         @map("ordem_id") @db.Uuid
   prestadorId        String         @map("prestador_id") @db.Uuid
   valor              Decimal        @db.Decimal(12, 2)
-  disponivelEm       DateTime       @map("disponivel_em") // data/hora em que o prestador consegue iniciar
+  disponivelEm       DateTime       @map("disponivel_em") // quando o prestador consegue iniciar
   tempoExecucaoHoras Int            @map("tempo_execucao_horas")
   observacao         String?
   status             StatusProposta @default(ENVIADA)
-  motivoRecusa       String?        @map("motivo_recusa") // preenchido quando o síndico reprova
+  motivoRecusa       String?        @map("motivo_recusa") // quando o aprovador reprova
   transferidaPorId   String?        @map("transferida_por_id") @db.Uuid
+  transferidaEm      DateTime?      @map("transferida_em")
   createdAt          DateTime       @default(now()) @map("created_at")
   updatedAt          DateTime       @updatedAt @map("updated_at")
 
-  chamado        Chamado   @relation(fields: [chamadoId], references: [id], onDelete: Cascade)
+  ordem          Ordem     @relation(fields: [ordemId], references: [id], onDelete: Cascade)
   prestador      Prestador @relation(fields: [prestadorId], references: [id])
   anexos         Anexo[]
   transferidaPor Usuario?  @relation("PropostaTransferidaPor", fields: [transferidaPorId], references: [id])
 
-  @@unique([chamadoId, prestadorId]) // 1 proposta ativa por prestador/chamado (editar em vez de reenviar)
-  @@index([prestadorId])
+  @@unique([ordemId, prestadorId]) // 1 proposta por prestador/ordem (upsert: editar ou reenviar)
+  @@index([prestadorId, status])
   @@map("propostas")
 }
 
-// Nota geral única (1–5), dada por quem contratou (síndico ou admin em nome do condomínio).
+/// Nota geral única (1–5) por ordem de serviço concluída, dada por um gestor (administradora,
+/// síndico do condomínio ou aprovador). Vista por qualquer gestor sem identificar o condomínio.
 model Avaliacao {
   id          String   @id @default(uuid()) @db.Uuid
-  chamadoId   String   @unique @map("chamado_id") @db.Uuid
+  ordemId     String   @unique @map("ordem_id") @db.Uuid
   prestadorId String   @map("prestador_id") @db.Uuid
   avaliadorId String   @map("avaliador_id") @db.Uuid
   nota        Int      @db.SmallInt
   comentario  String?
   createdAt   DateTime @default(now()) @map("created_at")
 
-  chamado   Chamado   @relation(fields: [chamadoId], references: [id])
+  ordem     Ordem     @relation(fields: [ordemId], references: [id])
   prestador Prestador @relation(fields: [prestadorId], references: [id])
   avaliador Usuario   @relation(fields: [avaliadorId], references: [id])
 

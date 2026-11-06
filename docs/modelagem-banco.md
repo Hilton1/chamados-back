@@ -1,31 +1,36 @@
 # Modelagem do banco de dados
 
 PostgreSQL (Supabase em produção, Docker em desenvolvimento). Fonte de verdade: [../prisma/schema.prisma](../prisma/schema.prisma).
-Imagem do diagrama: [modelagem-banco.png](modelagem-banco.png) (gerada do bloco Mermaid abaixo, arquivo [modelagem-banco.mmd](modelagem-banco.mmd)).
+Imagem do diagrama: [modelagem-banco.png](modelagem-banco.png), gerada do bloco abaixo ([modelagem-banco.mmd](modelagem-banco.mmd)) com
+`npx -p @mermaid-js/mermaid-cli mmdc -i docs/modelagem-banco.mmd -o docs/modelagem-banco.png -s 2 -b white`.
+
+Versão de 06/11/2026: aplica a reunião com o professor de 04/10/2026 (ordem de serviço, perfil por condomínio,
+aprovador por condomínio, vários tipos de serviço por ordem, nota fiscal e comprovante de pagamento).
 
 ## 1. Diagrama entidade-relacionamento
 
 ```mermaid
 erDiagram
-  CONDOMINIOS ||--o{ VINCULOS_CONDOMINIO : "escopo de acesso"
+  CONDOMINIOS ||--o{ VINCULOS_CONDOMINIO : "perfil por condominio"
   USUARIOS ||--o{ VINCULOS_CONDOMINIO : possui
-  USUARIOS ||--o| PRESTADORES : "perfil PRESTADOR"
-  USUARIOS ||--o{ PRESTADORES : "aprova (admin)"
-  CATEGORIAS ||--o{ PRESTADOR_CATEGORIAS : "especialidade"
+  USUARIOS |o--o{ CONDOMINIOS : "aprova propostas"
+  USUARIOS ||--o| PRESTADORES : "conta do prestador"
+  USUARIOS ||--o{ PRESTADORES : "aprova (administradora)"
+  CATEGORIAS ||--o{ PRESTADOR_CATEGORIAS : "tipo de servico"
   PRESTADORES ||--o{ PRESTADOR_CATEGORIAS : atende
-  CONDOMINIOS ||--o{ CHAMADOS : possui
-  CATEGORIAS ||--o{ CHAMADOS : classifica
-  USUARIOS ||--o{ CHAMADOS : abre
-  USUARIOS ||--o{ CHAMADOS : "aprova (sindico)"
-  CHAMADOS ||--o{ ANEXOS : tem
+  CONDOMINIOS ||--o{ ORDENS_SERVICO : possui
+  USUARIOS ||--o{ ORDENS_SERVICO : abre
+  ORDENS_SERVICO ||--|{ ORDEM_CATEGORIAS : envolve
+  CATEGORIAS ||--o{ ORDEM_CATEGORIAS : classifica
+  ORDENS_SERVICO ||--o{ ANEXOS : tem
   PROPOSTAS ||--o{ ANEXOS : "arquivos da proposta"
   USUARIOS ||--o{ ANEXOS : envia
-  CHAMADOS ||--o{ CHAMADO_EVENTOS : "linha do tempo"
-  USUARIOS ||--o{ CHAMADO_EVENTOS : "autor"
-  CHAMADOS ||--o{ PROPOSTAS : recebe
+  ORDENS_SERVICO ||--o{ ORDEM_EVENTOS : "linha do tempo"
+  USUARIOS ||--o{ ORDEM_EVENTOS : autor
+  ORDENS_SERVICO ||--o{ PROPOSTAS : recebe
   PRESTADORES ||--o{ PROPOSTAS : envia
-  USUARIOS ||--o{ PROPOSTAS : "transfere (admin)"
-  CHAMADOS ||--o| AVALIACOES : gera
+  USUARIOS ||--o{ PROPOSTAS : "transfere (administradora)"
+  ORDENS_SERVICO ||--o| AVALIACOES : gera
   PRESTADORES ||--o{ AVALIACOES : recebe
   USUARIOS ||--o{ AVALIACOES : avalia
 
@@ -40,25 +45,28 @@ erDiagram
     decimal latitude "mapa"
     decimal longitude "mapa"
     bool ativo
+    uuid aprovador_id FK "null = administradora aprova"
   }
   USUARIOS {
     uuid id PK
     string clerk_user_id UK "null ate o 1o login"
     string nome
-    string email UK
+    string email UK "minusculo"
     string telefone
-    enum perfil "ADMIN SINDICO FISCAL ZELADOR PRESTADOR"
-    bool ativo
+    bool administradora "perfil ADMIN"
+    bool ativo "soft delete"
   }
   VINCULOS_CONDOMINIO {
     uuid usuario_id PK,FK
     uuid condominio_id PK,FK
+    enum perfil "SINDICO FISCAL ZELADOR"
   }
   CATEGORIAS {
     uuid id PK
     string slug UK
-    string nome
-    bool interna "TI = uso interno"
+    string nome UK
+    bool interna "so a administradora abre"
+    bool zelador_pode_abrir
     bool ativa
   }
   PRESTADORES {
@@ -69,10 +77,11 @@ erDiagram
     string telefone_whatsapp "E.164"
     bool emite_nota_fiscal
     string area_atuacao
-    enum status "PENDENTE APROVADO BLOQUEADO"
+    enum status "PENDENTE APROVADO"
+    enum origem "AUTOCADASTRO ADMINISTRADORA"
+    bool ativo
+    string motivo_inativacao
     uuid aprovado_por_id FK
-    datetime aprovado_em
-    string motivo_bloqueio
     decimal media_avaliacao "desnormalizado"
     int total_avaliacoes "desnormalizado"
   }
@@ -80,58 +89,62 @@ erDiagram
     uuid prestador_id PK,FK
     uuid categoria_id PK,FK
   }
-  CHAMADOS {
+  ORDENS_SERVICO {
     uuid id PK
-    int numero UK "protocolo"
+    int numero UK "protocolo a partir de 101"
     uuid condominio_id FK
-    uuid categoria_id FK
     uuid criado_por_id FK
+    enum perfil_criador "perfil ativo ao abrir"
     string titulo
     text descricao
     string local
     enum urgencia "NORMAL URGENTE"
     enum status "ABERTO AGUARDANDO_APROVACAO EM_EXECUCAO CONCLUIDO CANCELADO"
     datetime prazo_propostas_ate
+    bool exige_nota_fiscal
     uuid aprovado_por_id FK
-    datetime aprovado_em
-    datetime concluido_em
-    datetime cancelado_em
+    uuid concluido_por_id FK
+    uuid cancelado_por_id FK
     string motivo_cancelamento
+  }
+  ORDEM_CATEGORIAS {
+    uuid ordem_id PK,FK
+    uuid categoria_id PK,FK
   }
   ANEXOS {
     uuid id PK
-    uuid chamado_id FK
+    uuid ordem_id FK
     uuid proposta_id FK "so no tipo PROPOSTA"
-    enum tipo "ABERTURA FORMULARIO PROPOSTA COMPROVACAO"
+    enum tipo "ABERTURA FORMULARIO PROPOSTA COMPROVACAO NOTA_FISCAL PAGAMENTO"
     uuid enviado_por_id FK
     string nome_original
     string storage_path
-    string mime_type "jpeg png pdf docx xlsx"
-    int tamanho_bytes
+    string mime_type
+    int tamanho_bytes "ate 5 MB"
   }
-  CHAMADO_EVENTOS {
+  ORDEM_EVENTOS {
     uuid id PK
-    uuid chamado_id FK
-    enum tipo "ABERTO PROPOSTA_RECEBIDA TRANSFERIDA APROVADA REPROVADA COMPROVACAO_ENVIADA CONCLUIDO CANCELADO AVALIADO"
+    uuid ordem_id FK
+    enum tipo "ABERTO ... NOTA_FISCAL_ENVIADA ... AVALIADO"
     uuid autor_id FK "null = sistema"
     string texto
     bool marco "destaque na tela"
   }
   PROPOSTAS {
     uuid id PK
-    uuid chamado_id FK
+    uuid ordem_id FK
     uuid prestador_id FK
     decimal valor
     datetime disponivel_em
     int tempo_execucao_horas
     string observacao
     enum status "ENVIADA TRANSFERIDA ACEITA RECUSADA CANCELADA"
-    string motivo_recusa "reprovacao do sindico"
+    string motivo_recusa "reprovacao"
     uuid transferida_por_id FK
   }
   AVALIACOES {
     uuid id PK
-    uuid chamado_id UK,FK
+    uuid ordem_id UK,FK
     uuid prestador_id FK
     uuid avaliador_id FK
     smallint nota "1 a 5"
@@ -139,88 +152,86 @@ erDiagram
   }
 ```
 
-Todas as tabelas têm também `created_at` e `updated_at` (omitidos acima por clareza; `anexos`, `avaliacoes` e `chamado_eventos` só têm `created_at`).
+Todas as tabelas têm `created_at`; as editáveis também `updated_at` (omitidos acima por clareza).
 
 ## 2. Dicionário de entidades
 
 | Tabela | Papel | Observações |
 |---|---|---|
-| `condominios` | Cada contrato/condomínio atendido pela administradora | É o **tenant** para a LGPD. `latitude`/`longitude` alimentam o mapa (nulas = sem mapa) |
-| `usuarios` | Toda pessoa que entra no sistema, com um único `perfil` | `clerk_user_id` liga ao Clerk; fica `null` para quem foi pré-cadastrado e ainda não logou |
-| `vinculos_condominio` | N:N usuário ↔ condomínio | SINDICO/FISCAL/ZELADOR só enxergam condomínios vinculados; ADMIN não precisa de vínculo |
-| `categorias` | Elétrica, hidráulica, limpeza, infraestrutura, TI | `interna = true` para TI (só ADMIN abre). Tabela e não enum, para a administradora criar novas |
-| `prestadores` | Dados do prestador (1:1 com `usuarios` de perfil PRESTADOR) | Nasce `PENDENTE`; só `APROVADO` vê o mural |
-| `prestador_categorias` | Especialidades do prestador (N:N) | Define o que ele vê no mural |
-| `chamados` | Demanda de manutenção | Fluxo em `status`; `prazo_propostas_ate` limita novas propostas |
-| `anexos` | Arquivos do chamado: `ABERTURA` (fotos de quem abriu), `FORMULARIO` (formulário para o prestador preencher), `PROPOSTA` (arquivo devolvido pelo prestador com a proposta, ligado a `proposta_id`) e `COMPROVACAO` (fotos/PDF de quem atendeu, opcional) | Só o caminho no bucket privado; a API gera URL assinada. Tipo de arquivo aceito depende do `tipo` |
-| `chamado_eventos` | Linha do tempo do chamado (aberto, propostas, transferência, aprovação, comprovação, conclusão, avaliação) | Gravada na mesma transação da mudança de estado. `marco = true` ganha destaque na tela |
-| `propostas` | Orçamento de um prestador para um chamado | 1 por prestador/chamado (editar em vez de reenviar) |
-| `avaliacoes` | Nota geral 1–5 após a conclusão | 1 por chamado; atualiza a média do prestador |
+| `condominios` | Cada condomínio atendido pela administradora | É o **tenant** da LGPD. `aprovador_id` = pessoa que aprova/reprova as propostas (null = a própria administradora). `latitude`/`longitude` alimentam o mapa |
+| `usuarios` | Toda conta: pessoas (administradora, síndico, fiscal, zelador) e prestadores | `administradora = true` → perfil ADMIN. `clerk_user_id` fica `null` até o 1º login (vínculo pelo e-mail verificado). `ativo = false` = desativado (soft delete) |
+| `vinculos_condominio` | Pessoa ↔ condomínio **com o perfil** dela ali | Um perfil por condomínio (PK composta). A mesma pessoa pode ser fiscal num e síndica noutro. Define o escopo LGPD |
+| `categorias` | Tipos de serviço (Elétrica, Piscina…) cadastrados pela administradora | `interna` (só a administradora abre; fora do autocadastro), `zelador_pode_abrir`, `ativa` (inativa some das escolhas, continua nas ordens antigas) |
+| `prestadores` | Cadastro do prestador (1:1 com `usuarios`) | `status` PENDENTE/APROVADO; `ativo` + `motivo_inativacao` para desativar/reativar; `origem` AUTOCADASTRO (entra PENDENTE) ou ADMINISTRADORA (entra APROVADO). E-mail e nome do contato ficam em `usuarios` |
+| `prestador_categorias` | N:N prestador ↔ tipo de serviço | Define o mural |
+| `ordens_servico` | A ordem de serviço | `numero` é o protocolo legível (começa em 101). `perfil_criador` guarda o perfil ativo de quem abriu. `exige_nota_fiscal` trava a conclusão até a NF chegar |
+| `ordem_categorias` | N:N ordem ↔ tipo de serviço | Uma ordem pode envolver vários tipos; o mural mostra a quem atende **qualquer** um deles |
+| `anexos` | Arquivos da ordem | `tipo`: ABERTURA, FORMULARIO, PROPOSTA (com `proposta_id`), COMPROVACAO, NOTA_FISCAL, PAGAMENTO. Só o caminho no bucket privado; a API gera URL assinada |
+| `ordem_eventos` | Linha do tempo | Gravada na mesma transação de cada mudança; `marco` destaca abertura, 3ª proposta, aprovação, reprovação, conclusão e cancelamento |
+| `propostas` | Proposta de um prestador para uma ordem | 1 por prestador/ordem (editar = upsert). `motivo_recusa` quando o aprovador reprova |
+| `avaliacoes` | Nota geral 1–5 + comentário | 1 por ordem concluída; atualiza `media_avaliacao`/`total_avaliacoes` do prestador na mesma transação |
 
 ## 3. Enums
 
 | Enum | Valores |
 |---|---|
-| `Perfil` | `ADMIN`, `SINDICO`, `FISCAL`, `ZELADOR`, `PRESTADOR` |
-| `StatusPrestador` | `PENDENTE`, `APROVADO`, `BLOQUEADO` |
-| `Urgencia` | `NORMAL` (propostas por até 48 h), `URGENTE` (imediato) |
-| `StatusChamado` | `ABERTO` → `AGUARDANDO_APROVACAO` → `EM_EXECUCAO` → `CONCLUIDO`; `CANCELADO` a partir de qualquer estado anterior a `CONCLUIDO` |
-| `TipoAnexo` | `ABERTURA`, `FORMULARIO`, `PROPOSTA`, `COMPROVACAO` |
-| `TipoEvento` | `ABERTO`, `PROPOSTA_RECEBIDA`, `TRANSFERIDA`, `APROVADA`, `REPROVADA`, `COMPROVACAO_ENVIADA`, `CONCLUIDO`, `CANCELADO`, `AVALIADO` |
-| `StatusProposta` | `ENVIADA`, `TRANSFERIDA` (admin transferiu ao síndico), `ACEITA` (síndico aprovou), `RECUSADA` (reprovada pelo síndico ou recusada ao aprovar outra), `CANCELADA` (pelo prestador) |
+| `Perfil` | ADMIN, SINDICO, FISCAL, ZELADOR, PRESTADOR (perfil ativo; usado em `perfil_criador`) |
+| `PerfilCondominio` | SINDICO, FISCAL, ZELADOR |
+| `StatusPrestador` | PENDENTE, APROVADO (desativar é `ativo = false`) |
+| `OrigemPrestador` | AUTOCADASTRO, ADMINISTRADORA |
+| `StatusOrdem` | ABERTO, AGUARDANDO_APROVACAO, EM_EXECUCAO, CONCLUIDO, CANCELADO |
+| `StatusProposta` | ENVIADA, TRANSFERIDA, ACEITA, RECUSADA, CANCELADA |
+| `TipoAnexo` | ABERTURA, FORMULARIO, PROPOSTA, COMPROVACAO, NOTA_FISCAL, PAGAMENTO |
+| `TipoEvento` | ABERTO, PROPOSTA_RECEBIDA, TRANSFERIDA, APROVADA, REPROVADA, COMPROVACAO_ENVIADA, NOTA_FISCAL_ENVIADA, CONCLUIDO, CANCELADO, AVALIADO |
 
-## 4. Restrições e índices
+## 4. Chaves, índices e constraints
 
-**Únicos:** `usuarios.email`, `usuarios.clerk_user_id`, `prestadores.documento`, `prestadores.usuario_id`, `condominios.cnpj`, `categorias.slug`, `chamados.numero`, `avaliacoes.chamado_id`, `propostas(chamado_id, prestador_id)`.
+**Únicos:** `usuarios.email`, `usuarios.clerk_user_id`, `condominios.cnpj`, `categorias.slug`, `categorias.nome`, `prestadores.usuario_id`, `prestadores.documento`, `ordens_servico.numero`, `propostas(ordem_id, prestador_id)`, `avaliacoes.ordem_id`.
 
-**Índices de consulta:** `chamados(condominio_id, status)` (lista por escopo), `chamados(categoria_id, status)` (mural), `chamados(status, urgencia, prazo_propostas_ate)` (ordenar urgentes), `propostas(prestador_id)`, `avaliacoes(prestador_id)`, `prestadores(status)`, `anexos(chamado_id, tipo)`, `anexos(proposta_id)`, `chamado_eventos(chamado_id, created_at)`.
+**Índices de consulta:** `ordens_servico(condominio_id, status)` (lista por escopo), `ordens_servico(criado_por_id)` (zelador vê as que abriu), `ordens_servico(status, urgencia, prazo_propostas_ate)` (mural e urgentes no topo), `ordem_categorias(categoria_id)` (mural), `prestador_categorias(categoria_id)`, `prestadores(status, ativo)`, `propostas(prestador_id, status)`, `anexos(ordem_id, tipo)`, `anexos(proposta_id)`, `ordem_eventos(ordem_id, created_at)`, `vinculos_condominio(condominio_id)`.
 
-**Constraints em SQL** (o Prisma não expressa; entram na 1ª migration, ver topo do schema):
+**Constraints em SQL** (o Prisma não expressa; estão no fim da migration inicial):
 
 | Regra | SQL |
 |---|---|
-| Nota entre 1 e 5 | `CHECK (nota BETWEEN 1 AND 5)` em `avaliacoes` |
-| Valor positivo | `CHECK (valor > 0)` em `propostas` |
-| Arquivo até 5 MB | `CHECK (tamanho_bytes <= 5242880)` em `anexos` |
-| Tipo de arquivo por tipo de anexo | `anexos_mime_por_tipo_chk`: ABERTURA = JPG/PNG; COMPROVACAO = JPG/PNG/PDF; FORMULARIO = PDF/DOCX/XLSX; PROPOSTA = JPG/PNG/PDF/DOCX/XLSX |
-| Arquivo de proposta sempre ligado a uma proposta | `anexos_proposta_chk`: `(tipo = 'PROPOSTA') = (proposta_id IS NOT NULL)` |
-| Só 1 proposta selecionada por chamado | índice único parcial em `propostas(chamado_id) WHERE status IN ('TRANSFERIDA','ACEITA')` |
+| Nota entre 1 e 5 | `avaliacoes_nota_chk` |
+| Valor e tempo de execução positivos | `propostas_valor_chk`, `propostas_tempo_execucao_chk` |
+| Arquivo até 5 MB | `anexos_tamanho_chk` |
+| Tipo de arquivo por tipo de anexo | `anexos_mime_por_tipo_chk`: ABERTURA = JPG/PNG; FORMULARIO = PDF/DOCX/XLSX; PROPOSTA = JPG/PNG/PDF/DOCX/XLSX; COMPROVACAO, NOTA_FISCAL e PAGAMENTO = JPG/PNG/PDF |
+| Arquivo de proposta sempre ligado a uma proposta | `anexos_proposta_chk` |
+| CPF/CNPJ só com dígitos | `prestadores_documento_chk` (11 ou 14 dígitos) |
+| E-mail em minúsculas | `usuarios_email_minusculo_chk` (o vínculo do 1º login compara e-mails) |
+| Só 1 proposta selecionada por ordem | índice único parcial `propostas_uma_selecionada_idx` em `propostas(ordem_id) WHERE status IN ('TRANSFERIDA','ACEITA')` |
+| Protocolo começa em #101 | `ALTER SEQUENCE ordens_servico_numero_seq RESTART WITH 101` |
 
-## 5. Regras de negócio que dependem do banco
+## 5. Regras de negócio que dependem do banco (garantidas no service)
 
-| Regra | Onde é garantida |
+| Regra | Onde |
 |---|---|
-| Um condomínio não vê dados de outro (LGPD) | Todo `SELECT` de chamados/propostas filtra por `condominio_id` dos `vinculos_condominio` do usuário (service layer) |
-| Prestador só entra após aprovação | `prestadores.status`; mural exige `APROVADO` |
-| Aprovar prestador exige nota fiscal | Service: `emite_nota_fiscal = true` |
-| Zelador só abre chamado de limpeza | Service: `categorias.slug = 'limpeza'` |
-| Categoria TI só para ADMIN | Service: `categorias.interna = true` |
-| Mínimo de 3 propostas é **aviso**, não bloqueio | Calculado na resposta da API (`count(propostas)`) |
-| Só avalia chamado `CONCLUIDO`; 1 avaliação por chamado | Service + `UNIQUE(avaliacoes.chamado_id)` |
-| Média do prestador sempre consistente | `media_avaliacao`/`total_avaliacoes` atualizados na **mesma transação** da avaliação |
-| Depois do prazo não entram propostas | Service compara `now()` com `prazo_propostas_ate` |
-| **Prestador só vê o local exato depois de aprovado** | A API devolve `localizacao` com coordenadas **arredondadas a 2 casas (~1 km)** e sem endereço enquanto a proposta não é `ACEITA`; após aprovação, coordenadas exatas e endereço |
-| Só o prestador da proposta `ACEITA` envia comprovação, com o chamado `EM_EXECUCAO` ou `CONCLUIDO` | Service; grava `anexos(tipo = COMPROVACAO)` + evento `COMPROVACAO_ENVIADA` |
-| Chamado com formulário exige o formulário devolvido na proposta | Service: se existe `anexos(tipo = FORMULARIO)` no chamado, a proposta precisa de ≥ 1 `anexos(tipo = PROPOSTA)` |
-| Síndico reprova só a proposta transferida | Service: proposta `TRANSFERIDA` → `RECUSADA` (+ `motivo_recusa`), chamado `AGUARDANDO_APROVACAO` → `ABERTO`, evento `REPROVADA` |
-| Comprovação é opcional e visível só para ADMIN, SINDICO do condomínio e o próprio prestador | Service (escopo por `condominio_id` / `prestador_id`) |
-| Linha do tempo sempre coerente com o estado | Todo service que muda `status`, transfere/aprova proposta ou anexa comprovação insere `chamado_eventos` na mesma transação |
+| Um condomínio não vê dados de outro (LGPD) | Toda consulta de ordens/propostas filtra pelos condomínios do perfil ativo (`vinculos_condominio`); ZELADOR só as que abriu (`criado_por_id`); ADMIN vê todas |
+| Perfil ativo | Cabeçalho `X-Perfil`; a API confere que a pessoa tem esse perfil (vínculo, `administradora` ou `prestadores`) |
+| Quem aprova | `condominios.aprovador_id` (pessoa ativa e vinculada ao condomínio) ou, se null, qualquer pessoa da administradora — que então aprova direto de ABERTO |
+| Não desativar/desvincular quem é aprovador | 409 `PESSOA_E_APROVADORA` |
+| Prestador só vê o mural se APROVADO e ativo | `prestadores.status`, `prestadores.ativo` |
+| Aprovar prestador exige nota fiscal | Service (`emite_nota_fiscal = true` no momento da aprovação; não é CHECK porque ele pode deixar de emitir depois e ser desativado) |
+| Zelador só abre tipos liberados; tipos internos só a administradora | `categorias.zelador_pode_abrir`, `categorias.interna` |
+| Mínimo de 3 propostas é aviso | Calculado na resposta |
+| Depois do prazo não entram propostas | `now()` × `prazo_propostas_ate` |
+| Ordem com formulário exige o arquivo devolvido na proposta | ≥ 1 `anexos(tipo = PROPOSTA)` da proposta; senão 409 `FORMULARIO_OBRIGATORIO` |
+| Conclusão exige comprovante de pagamento e, se `exige_nota_fiscal`, a NF | 409 `NOTA_FISCAL_PENDENTE` |
+| Prestador só vê o local exato depois de aprovado | Localização arredondada a 2 casas, sem endereço, até a proposta ser ACEITA |
+| Média do prestador consistente | Atualizada na mesma transação da avaliação |
+| Linha do tempo coerente | Evento gravado na mesma transação de cada mudança |
 
-## 6. O que mudou em relação ao modelo do rascunho
+## 6. O que mudou em relação à modelagem anterior (02/10/2026)
 
 | Antes | Agora | Motivo |
 |---|---|---|
-| `usuarios_admin` (só admin) | `usuarios` com `perfil` | Entrevista: admin, síndico, fiscal, zelador e prestador |
-| — | `condominios` + `vinculos_condominio` | LGPD: isolar dados por condomínio (`condominio_id`) |
-| `prestadores` com telefone e senha | `prestadores` ligado a `usuarios`; login no Clerk | Autenticação delegada (e-mail/senha e Google) |
-| `especialidades` | `categorias` (+ `interna`) e `prestador_categorias` | TI como uso interno; prestador com várias especialidades |
-| — | `emite_nota_fiscal`, `status`, aprovação | Pré-cadastro e aprovação obrigatórios |
-| `chamados.status` genérico | Fluxo com `AGUARDANDO_APROVACAO` + `aprovado_por_id` | Admin transfere, síndico aprova |
-| Sem prazo | `prazo_propostas_ate`, urgência `NORMAL/URGENTE` | 48 h vs. imediato |
-| Sem fotos | `anexos` (`tipo` ABERTURA/FORMULARIO/PROPOSTA/COMPROVACAO) | Foto opcional na abertura; formulário para o prestador; comprovação do serviço por quem atendeu |
-| `fornecedores`, perfil `FORNECEDOR` | `prestadores`, perfil `PRESTADOR` | Feedback do professor (01/10): "fornecedor" é quem vende produto |
-| Proposta `INDICADA` | `TRANSFERIDA` + reprovação pelo síndico (`motivo_recusa`, evento `REPROVADA`) | Feedback do professor (01/10) |
-| — | `condominios.latitude/longitude` | Mapa do local |
-| — | `chamado_eventos` | Linha do tempo do chamado |
-| `propostas.tempo_previsto` texto | `tempo_execucao_horas` inteiro + `disponivel_em` datetime | Comparação e ordenação; disponibilidade obrigatória |
-| `avaliacoes` com nota e comentário | Idem, com `avaliador_id` e nota geral única | Decisão: nota geral definida pelo contratante |
+| `chamados`, `chamado_eventos`, `StatusChamado` | `ordens_servico`, `ordem_eventos`, `StatusOrdem` | Reunião de 04/10: "ordem de serviço" |
+| `usuarios.perfil` (um perfil por pessoa) | `usuarios.administradora` + `vinculos_condominio.perfil` | Mesma pessoa com perfis diferentes em condomínios diferentes |
+| Síndico aprova | `condominios.aprovador_id` (null = administradora) | Cada condomínio define quem aprova |
+| `chamados.categoria_id` | `ordem_categorias` (N:N) | Uma ordem pode envolver vários tipos de serviço |
+| `categorias` com `interna`/`ativa` | + `zelador_pode_abrir`, `nome` único | Tipos de serviço cadastrados pela administradora |
+| `StatusPrestador.BLOQUEADO`, `motivo_bloqueio` | `ativo` + `motivo_inativacao`; `origem` | Desativar/reativar sem apagar; cadastro pela administradora |
+| — | `ordens_servico.exige_nota_fiscal`, anexos `NOTA_FISCAL` e `PAGAMENTO`, evento `NOTA_FISCAL_ENVIADA` | Nota fiscal e comprovante de pagamento |
+| — | `perfil_criador`, `concluido_por_id`, `cancelado_por_id`, `propostas.transferida_em` | Linha do tempo e "aberta por" com o perfil |

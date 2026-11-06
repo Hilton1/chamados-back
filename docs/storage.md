@@ -1,6 +1,6 @@
 # Storage de anexos — Supabase hoje, S3/R2 se ficar mais barato
 
-Fotos da abertura e comprovações (JPG/PNG/PDF, até 5 MB) ficam num bucket **privado**. O banco guarda só o caminho (`anexos.storage_path`, ex.: `chamados/<id>/abertura/<uuid>.jpg`); a API gera **URL assinada** de curta duração (`STORAGE_SIGNED_URL_TTL`, padrão 10 min) ao devolver o chamado.
+Todos os arquivos da ordem de serviço (fotos da abertura, formulário, arquivos da proposta, comprovação, nota fiscal e comprovante de pagamento; até 5 MB) ficam num bucket **privado**. O banco guarda só o caminho (`anexos.storage_path`, ex.: `ordens/<id>/abertura/<uuid>.jpg`); a API gera **URL assinada** de curta duração (`STORAGE_SIGNED_URL_TTL`, padrão 10 min) ao devolver a ordem de serviço.
 
 ## Como o código está preparado
 

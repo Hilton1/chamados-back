@@ -4,6 +4,8 @@ Plano de execução em etapas. Regras de negócio: [CLAUDE.md](CLAUDE.md). Contr
 
 Legenda: `[x]` feito · `[ ]` a fazer · **(front)** = ajuste no repositório do front · **(PO)** = depende de resposta da PO.
 
+> **Nomes atuais (06/11/2026):** nas etapas abaixo, leia "chamado" como **ordem de serviço** (`Ordem`, rotas `/ordens`) e "síndico aprova" como **o aprovador do condomínio aprova**. As rotas e regras vigentes estão em [CLAUDE.md §3, §4 e §8](CLAUDE.md#8-api); a seção "Reunião com o professor" no fim lista o que mudou.
+
 Princípios que valem para todas as etapas:
 - Toda rota: schema Zod → controller (só HTTP) → service (regra + escopo) → Prisma.
 - **Respostas no formato de `front/types/index.ts`**: cada módulo tem um *serializer* que converte `Decimal` → `number`, datas → ISO, e monta os objetos aninhados (`prestador`, `condominio`…). O front não deve precisar converter nada.
@@ -19,12 +21,13 @@ Princípios que valem para todas as etapas:
 - [x] Logger (pino), CORS por `FRONTEND_URL`, helmet, erro padrão `{ erro: { codigo, mensagem } }`
 - [x] `GET /api/health` (consulta o banco — o ping mantém Render e Supabase acordados)
 - [x] Docker: `docker compose up -d` sobe Postgres + API com hot reload; Dockerfile multi-stage (dev / prod)
-- [x] Primeira migration com as constraints SQL (CHECKs + índice único parcial) e `npm run seed` (categorias + 1º ADMIN)
+- [x] Migration inicial com as constraints SQL (CHECKs + índice único parcial) e `npm run seed` (tipos de serviço + 1ª pessoa da administradora) — refeita em 06/11 com o modelo de ordens de serviço
 - [x] Storage plugável: `STORAGE_DRIVER=supabase` (padrão) ou `s3` (S3/R2) — [docs/storage.md](docs/storage.md)
 - [x] CI (lint, typecheck, test, build, imagem Docker) e deploy (migrate + Deploy Hook) — [docs/deploy.md](docs/deploy.md)
 - [x] `render.yaml` (Blueprint) e workflow opcional para manter a API acordada
 - [x] Guia do Clerk — [docs/clerk-setup.md](docs/clerk-setup.md)
-- [ ] Criar o repositório no GitHub e fazer o 1º commit/push
+- [x] 1º commit local (06/11/2026)
+- [ ] Criar o repositório no GitHub e fazer o push
 
 Trello: *[Setup] Criar repositórios*, *[Setup] Configurar CI/CD*, *[Setup] Configurar banco (Prisma + migrations)*, *[Setup] Conectar Vercel e Railway* (Railway → Render).
 
@@ -113,7 +116,7 @@ Trello: *[Avaliação] Registrar*, *Calcular média*, *Exibir histórico*, *[Ava
 ## Etapa 8 — Integração com o front
 
 - [ ] Rodar o front com `NEXT_PUBLIC_MOCK=false` contra a API local e passar por todos os perfis
-- [ ] Seed de **demonstração** (`npm run seed:demo`): condomínios, usuários `+clerk_test`, prestadores, chamados em todos os estados — igual ao mock do front
+- [x] Seed de **demonstração** (`npm run seed:demo`): condomínios, pessoas e prestadores `+clerk_test`, ordens #101–#125 em todos os estados — igual ao mock do front (sem os arquivos no bucket nem fotos)
 - [ ] Checklist de contrato: cada função de `front/lib/services.ts` × endpoint (formato, status HTTP, erros)
 - [ ] **(front)** "esqueci minha senha" (Clerk `resetPasswordEmailCode`)
 
@@ -149,24 +152,24 @@ Trello: *[Polimento] Testes finais end-to-end*, *Preparar apresentação*.
 | Botão "Abrir chamado" solto no painel do síndico | Coluna "Atenção" com avisos para todos os perfis; some quando vazia | [x] front |
 | Foto do problema no chamado | Já existia (passo 2 do novo chamado) | — |
 
-## Reunião com o professor (04/10/2026) — aplicar no back antes da Etapa 1
+## Reunião com o professor (04/10/2026) — base de dados aplicada em 06/11/2026
 
-O front já está com o fluxo completo no mock: o contrato é `front/lib/services.ts` + `front/types/index.ts`, e o fluxo por perfil está em `front/docs/fluxo.md`. O schema do back **ainda não** reflete estas mudanças; fazer tudo numa migration inicial nova (o banco nunca foi para produção).
+O front já está com o fluxo completo no mock: o contrato é `front/lib/services.ts` + `front/types/index.ts`, e o fluxo por perfil está em `front/docs/fluxo.md`. **Schema, migration inicial nova, seeds e docs feitos em 06/11/2026** (`[x]` abaixo = parte de banco pronta); as rotas e regras entram nas Etapas 1–7 já com estes nomes.
 
-- [ ] **"Chamado" → "Ordem de serviço"** em tudo: model `Ordem` (tabela `ordens_servico`), rotas `/api/ordens`, enums `StatusOrdem`, campos `ordem_id`, docs e diagrama
-- [ ] **Perfil por vínculo:** tirar `usuarios.perfil`; `vinculos_condominio` ganha `perfil` (SINDICO/FISCAL/ZELADOR, um por condomínio); `usuarios.administradora boolean`; `usuarios.ativo`. `GET /me` devolve `{ administradora, vinculos[{ condominio, perfil }], condominiosAdministrados?, prestador? }`
-- [ ] **Perfil ativo:** cabeçalho `X-Perfil` define o escopo das listagens; a autorização de cada ação continua pelo vínculo da pessoa no condomínio da OS
-- [ ] **Aprovador por condomínio:** `condominios.aprovador_id` (nullable = administradora aprova). Validar que é pessoa ativa vinculada; impedir desativar/desvincular quem é aprovador (409 `PESSOA_E_APROVADORA`)
-- [ ] Aprovar/reprovar por **quem é o aprovador** (não mais "SINDICO"); quando a aprovadora é a administradora, `POST /ordens/:id/aprovar` vale direto de `ABERTO`
-- [ ] **Tipos de serviço:** `categorias` com `zelador_pode_abrir`, `interna`, `ativa`; CRUD `GET/POST/PATCH /categorias` (+ `?todas=1`, `GET /categorias/uso`)
-- [ ] **Vários tipos por OS:** tabela `ordem_categorias` (N:N). Mural: OS com **qualquer** tipo atendido pelo prestador
-- [ ] **Nota fiscal:** `ordens.exige_nota_fiscal`; anexos `NOTA_FISCAL` via `POST /ordens/:id/notas-fiscais` (prestador da proposta aceita); conclusão recusa com 409 `NOTA_FISCAL_PENDENTE`
-- [ ] **Comprovante de pagamento:** anexo `PAGAMENTO` obrigatório em `PATCH /ordens/:id/concluir` (multipart `comprovantes`); visível ao prestador
-- [ ] **Pessoas:** CRUD `GET/POST/PATCH /pessoas` (e-mail único, vínculos, `contaCriada` = `clerk_user_id` preenchido); soft delete
-- [ ] **Prestadores:** campos `nome_contato`, `email`, `origem` (AUTOCADASTRO/ADMINISTRADORA), `ativo`, `motivo_inativacao`; status só `PENDENTE`/`APROVADO` (o antigo `BLOQUEADO` vira `ativo = false`). Rotas: `GET/POST/PATCH /prestadores`, `/:id/aprovar`, `/:id/desativar`, `/:id/reativar`, `GET/PATCH /prestadores/me`. Cadastro pela administradora já entra `APROVADO` e casa com a conta pelo e-mail no 1º login (igual às pessoas)
-- [ ] **Condomínios:** `uf`, `ativo`; CRUD com aprovador
-- [ ] Eventos novos: `NOTA_FISCAL_ENVIADA`; texto de conclusão citando o comprovante
-- [ ] `GET /me` responde **403** para pessoa ou prestador desativado (o front mostra "acesso desativado")
+- [x] **"Chamado" → "Ordem de serviço"** em tudo: model `Ordem` (tabela `ordens_servico`), rotas `/api/ordens`, enums `StatusOrdem`, campos `ordem_id`, docs e diagrama
+- [x] **Perfil por vínculo:** tirar `usuarios.perfil`; `vinculos_condominio` ganha `perfil` (SINDICO/FISCAL/ZELADOR, um por condomínio); `usuarios.administradora boolean`; `usuarios.ativo`. `GET /me` devolve `{ administradora, vinculos[{ condominio, perfil }], condominiosAdministrados?, prestador? }`
+- [ ] **Perfil ativo** (Etapa 1): cabeçalho `X-Perfil` define o escopo das listagens; a autorização de cada ação continua pelo vínculo da pessoa no condomínio da OS
+- [x] **Aprovador por condomínio** (coluna; validações no service da Etapa 2): `condominios.aprovador_id` (nullable = administradora aprova). Validar que é pessoa ativa vinculada; impedir desativar/desvincular quem é aprovador (409 `PESSOA_E_APROVADORA`)
+- [ ] (Etapa 6) Aprovar/reprovar por **quem é o aprovador** (não mais "SINDICO"); quando a aprovadora é a administradora, `POST /ordens/:id/aprovar` vale direto de `ABERTO`
+- [x] **Tipos de serviço** (colunas; CRUD na Etapa 2): `categorias` com `zelador_pode_abrir`, `interna`, `ativa`; CRUD `GET/POST/PATCH /categorias` (+ `?todas=1`, `GET /categorias/uso`)
+- [x] **Vários tipos por ordem de serviço:** tabela `ordem_categorias` (N:N). Mural: OS com **qualquer** tipo atendido pelo prestador
+- [x] **Nota fiscal** (colunas e tipo de anexo; rotas nas Etapas 4 e 6): `ordens.exige_nota_fiscal`; anexos `NOTA_FISCAL` via `POST /ordens/:id/notas-fiscais` (prestador da proposta aceita); conclusão recusa com 409 `NOTA_FISCAL_PENDENTE`
+- [x] **Comprovante de pagamento** (tipo de anexo; rota na Etapa 6): anexo `PAGAMENTO` obrigatório em `PATCH /ordens/:id/concluir` (multipart `comprovantes`); visível ao prestador
+- [ ] **Pessoas** (Etapa 2; colunas prontas): CRUD `GET/POST/PATCH /pessoas` (e-mail único, vínculos, `contaCriada` = `clerk_user_id` preenchido); soft delete
+- [x] **Prestadores** (colunas; rotas na Etapa 2): `nome_contato` e `email` ficam na conta (`usuarios.nome`/`usuarios.email`), `origem` (AUTOCADASTRO/ADMINISTRADORA), `ativo`, `motivo_inativacao`; status só `PENDENTE`/`APROVADO` (o antigo `BLOQUEADO` vira `ativo = false`). Rotas: `GET/POST/PATCH /prestadores`, `/:id/aprovar`, `/:id/desativar`, `/:id/reativar`, `GET/PATCH /prestadores/me`. Cadastro pela administradora já entra `APROVADO` e casa com a conta pelo e-mail no 1º login (igual às pessoas)
+- [x] **Condomínios** (colunas; CRUD na Etapa 2): `uf`, `ativo`; CRUD com aprovador
+- [x] Eventos novos: `NOTA_FISCAL_ENVIADA`; texto de conclusão citando o comprovante
+- [ ] (Etapa 1) `GET /me` responde **403** para pessoa ou prestador desativado (o front mostra "acesso desativado")
 
 ## Fora de escopo da v1 (cards do Trello que não viram tarefa)
 

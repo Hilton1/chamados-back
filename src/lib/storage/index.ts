@@ -13,9 +13,10 @@ export function storage(): Storage {
   return instancia;
 }
 
-/** Caminhos no bucket: `chamados/{id}/abertura/…` e `chamados/{id}/comprovacao/…`. */
-export const caminhoAnexo = (
-  chamadoId: string,
-  tipo: "abertura" | "comprovacao",
-  arquivo: string,
-) => `chamados/${chamadoId}/${tipo}/${arquivo}`;
+/** Pasta de cada tipo de anexo dentro da ordem de serviço. */
+export type PastaAnexo =
+  "abertura" | "formulario" | "proposta" | "comprovacao" | "nota-fiscal" | "pagamento";
+
+/** Caminhos no bucket: `ordens/{id}/{pasta}/…` (arquivos da proposta: `ordens/{id}/proposta/{propostaId}/…`). */
+export const caminhoAnexo = (ordemId: string, pasta: PastaAnexo, arquivo: string) =>
+  `ordens/${ordemId}/${pasta}/${arquivo}`;

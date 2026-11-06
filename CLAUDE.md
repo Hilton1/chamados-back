@@ -6,11 +6,17 @@ Plano de execução em etapas: **[TASKS.md](TASKS.md)** (marque os itens conform
 
 ## 1. O que é o projeto
 
-**CondoCheck** — plataforma para uma **administradora de condomínios** unir dois modelos: sistema de chamados de manutenção e marketplace de prestadores.
-Ciclo: **chamado → propostas → comparação → transferência (admin) → aprovação (síndico) → contato via WhatsApp → conclusão → avaliação**.
-Hoje o processo é manual e lento (app "Alvo" + cotação por fora). Origem dos requisitos: entrevista com a PO Yasmin (18/09/2026) e feedback do professor orientador (01/10/2026).
+**CondoCheck** — plataforma para uma **administradora de condomínios** unir dois modelos: ordens de serviço de manutenção e marketplace de prestadores.
+Ciclo: **ordem de serviço → propostas → comparação → transferência (administradora) → aprovação ou reprovação (aprovador do condomínio) → WhatsApp → nota fiscal (se exigida) → conclusão com comprovante de pagamento → avaliação**.
+Hoje o processo é manual e lento (app "Alvo" + cotação por fora). Origem dos requisitos: entrevista com a PO Yasmin (18/09/2026), feedback do professor orientador (01/10/2026) e reunião com o professor (04/10/2026).
 
-**Vocabulário (feedback de 01/10):** quem atende é **prestador de serviço** (no código, `Prestador`/`PRESTADOR`), nunca "fornecedor" — fornecedor é quem vende produto. A administradora **transfere** a proposta ao síndico (`TRANSFERIDA`), não "indica".
+**Vocabulário:**
+- **Ordem de serviço** por extenso nas mensagens (nunca a sigla "OS", nunca "chamado"). Código: `Ordem`, `StatusOrdem`, tabela `ordens_servico`, rotas `/api/ordens`.
+- Quem atende é **prestador de serviço** (`Prestador`/`PRESTADOR`), nunca "fornecedor".
+- A administradora **transfere para aprovação** (`TRANSFERIDA`), não "indica".
+- **Tipo de serviço** (Elétrica, Piscina…) na tela; no código continua `Categoria`.
+
+O front já tem o fluxo completo em modo mock. **O contrato da API é [front/lib/services.ts](../front/lib/services.ts) + [front/types/index.ts](../front/types/index.ts)**; o fluxo por perfil está em [front/docs/fluxo.md](../front/docs/fluxo.md).
 
 ## 2. Stack e decisões
 
@@ -21,8 +27,8 @@ Hoje o processo é manual e lento (app "Alvo" + cotação por fora). Origem dos 
 | ORM / migrations | **Prisma 6** | Schema em [prisma/schema.prisma](prisma/schema.prisma). Fixar `prisma@6` (a v7 mudou a config de datasource) |
 | Banco | PostgreSQL — **Supabase** (prod), Docker (local) | Free: 500 MB, pausa após 7 dias sem uso |
 | Autenticação | **Clerk** (`@clerk/express`) — e-mail+senha **e Google** | O front usa telas próprias (não o componente pronto do Clerk). Ver seção 6 e [docs/clerk-setup.md](docs/clerk-setup.md). **Não** usar JWT/bcrypt próprios (cards antigos do Trello estão desatualizados) |
-| Upload de arquivos | **Supabase Storage** (bucket privado `anexos`; pastas `chamados/{id}/abertura/`, `formulario/`, `comprovacao/` e `propostas/{propostaId}/`) atrás da interface `Storage` (`src/lib/storage`) | Free: 1 GB. Driver `s3` pronto para migrar a S3/**Cloudflare R2** trocando só variáveis (`STORAGE_DRIVER`). Sem emulador local: dev usa um projeto Supabase de dev. Ver [docs/storage.md](docs/storage.md) |
-| Upload no servidor | `multer` (memória) | Máx. 5 MB; tipos aceitos por tipo de anexo (fotos JPG/PNG, comprovação +PDF, formulário PDF/DOCX/XLSX, arquivos da proposta: todos esses). Validar o tipo pelo conteúdo (magic bytes, `file-type`), não só pela extensão |
+| Upload de arquivos | **Supabase Storage** (bucket privado `anexos`; pastas `ordens/{id}/abertura/`, `formulario/`, `proposta/{propostaId}/`, `comprovacao/`, `nota-fiscal/`, `pagamento/`) atrás da interface `Storage` (`src/lib/storage`) | Free: 1 GB. Driver `s3` pronto para migrar a S3/**Cloudflare R2** trocando só variáveis (`STORAGE_DRIVER`). Sem emulador local: dev usa um projeto Supabase de dev. Ver [docs/storage.md](docs/storage.md) |
+| Upload no servidor | `multer` (memória) | Máx. 5 MB; tipos aceitos por tipo de anexo (fotos JPG/PNG; formulário PDF/DOCX/XLSX; arquivos da proposta: todos esses; comprovação, nota fiscal e pagamento: JPG/PNG/PDF). Validar o tipo pelo conteúdo (magic bytes, `file-type`), não só pela extensão |
 | WhatsApp | link `https://wa.me/<numero>?text=<msg>` | Sem API oficial, sem custo |
 | Mapa | Embed do **OpenStreetMap** no front; coordenadas em `condominios.latitude/longitude` | Sem chave de API e sem custo. Geocodificar o endereço no cadastro do condomínio (ex.: Nominatim, respeitando a política de uso) ou preencher manualmente |
 | Deploy da API | **Render** (Web Service Docker, plano free, [render.yaml](render.yaml)) | Railway descartado (sem plano gratuito utilizável). Render free dorme após 15 min sem tráfego (cold start ~1 min). Imagem Docker = portável para Koyeb/Northflank/Cloud Run. Alternativas na seção 12 |
@@ -31,52 +37,60 @@ Hoje o processo é manual e lento (app "Alvo" + cotação por fora). Origem dos 
 
 ## 3. Perfis e permissões
 
-Perfis: `ADMIN` (administradora), `SINDICO`, `FISCAL`, `ZELADOR`, `PRESTADOR`. **Morador não tem acesso.**
-Escopo por condomínio: SINDICO/FISCAL/ZELADOR só acessam condomínios vinculados (`vinculos_condominio`). ADMIN acessa todos.
+Uma **conta por pessoa** (`usuarios`), com perfil **por condomínio**:
+- `ADMIN` = `usuarios.administradora = true` (equipe da administradora; vê todos os condomínios).
+- `SINDICO`, `FISCAL`, `ZELADOR` = `vinculos_condominio.perfil` (um por condomínio; a mesma pessoa pode ser fiscal num e síndica noutro).
+- `PRESTADOR` = tem linha em `prestadores`.
+- **Morador não tem acesso.**
 
-| Ação | ADMIN | SINDICO | FISCAL | ZELADOR | PRESTADOR |
-|---|:-:|:-:|:-:|:-:|:-:|
-| Gerenciar usuários e condomínios | ✔ | | | | |
-| Aprovar/bloquear prestador | ✔ | | | | |
-| Abrir chamado | ✔ | ✔ | ✔ | só **limpeza** | |
-| Categoria TI (uso interno) | ✔ | | | | |
-| Ver chamados | todos | do(s) seu(s) condomínio(s) | do(s) seu(s) | só os que abriu | mural (ver abaixo) |
-| Ver/comparar propostas | ✔ | ✔ | | | só as próprias |
-| Transferir proposta ao síndico | ✔ | | | | |
-| Aprovar ou **reprovar** a proposta transferida | | ✔ | | | |
-| Anexar **formulário** para o prestador preencher | ✔ | ✔ | ✔ | | |
-| Devolver o formulário preenchido com a proposta | | | | | ✔ |
-| Concluir / cancelar chamado | ✔ | ✔ | | | |
-| Avaliar prestador | ✔ | ✔ | | | |
-| Ver avaliações de prestadores (todos os condomínios) | ✔ | ✔ | | | próprias |
-| Enviar/editar/cancelar proposta | | | | | ✔ |
-| Enviar **comprovação** do serviço (fotos/PDF, opcional) | | | | | ✔ (só o aprovado) |
-| Ver comprovações | ✔ | ✔ | | | as próprias |
+**Perfil ativo:** o front escolhe e manda no cabeçalho `X-Perfil`. A API confere que a pessoa tem esse perfil e usa-o para o **escopo das listagens** (condomínios onde atua com aquele perfil). A **autorização de cada ação** usa o vínculo da pessoa **no condomínio da ordem** e se ela é o aprovador dali.
 
-- **Mural do prestador:** só chamados `ABERTO`, dentro do prazo, de categorias em que ele é `APROVADO`. Expõe título, categoria, descrição, urgência, fotos, bairro/cidade. **Nunca** endereço completo nem dados de moradores (LGPD).
+**Aprovador:** `condominios.aprovador_id` = pessoa ativa vinculada ao condomínio (qualquer perfil), ou `null` = a própria administradora aprova. "Gestor" de uma ordem = ADMIN, SINDICO daquele condomínio ou o aprovador.
+
+| Ação | ADMIN | SINDICO | FISCAL | ZELADOR | Aprovador | PRESTADOR |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|
+| Cadastros (condomínios, pessoas, tipos de serviço, prestadores) | ✔ | | | | | |
+| Aprovar autocadastro / desativar / reativar prestador | ✔ | | | | | |
+| Consultar prestadores | ✔ | ✔ | | | | |
+| Abrir ordem de serviço | ✔ | ✔ | ✔ | só tipos com `zelador_pode_abrir` | | |
+| Tipo de serviço `interna` (ex.: TI) | ✔ | | | | | |
+| Exigir nota fiscal / anexar formulário na abertura | ✔ | ✔ | ✔ | | | |
+| Ver ordens | todas | do condomínio | do condomínio | só as que abriu | | mural + as próprias propostas |
+| Ver/comparar propostas | ✔ | ✔ | | | ✔ | só a própria |
+| Transferir para aprovação | ✔ | | | | | |
+| Aprovar / reprovar a proposta transferida | quando o condomínio não tem aprovador (aprova direto de `ABERTO`) | | | | ✔ | |
+| WhatsApp, concluir (com comprovante de pagamento), cancelar, avaliar | ✔ | ✔ | | | ✔ | |
+| Enviar/editar/cancelar proposta (com o formulário devolvido) | | | | | | ✔ (APROVADO e ativo) |
+| Anexar nota fiscal e comprovação | | | | | | ✔ (só o da proposta `ACEITA`) |
+
+- **Mural do prestador:** ordens `ABERTO`, dentro do prazo, com **qualquer** tipo de serviço que ele atende; só prestador `APROVADO` e `ativo`. Expõe título, tipos, descrição, urgência, fotos, formulário, selo "Exige nota fiscal", bairro/cidade. **Nunca** endereço completo nem nome do condomínio (LGPD).
 - Avaliações mostram nota e comentário, **sem** identificar o condomínio avaliador.
-- **Mapa / localização:** ADMIN, SINDICO, FISCAL e ZELADOR recebem as coordenadas exatas e o endereço do condomínio. O **prestador só recebe coordenadas arredondadas a 2 casas (~1 km) e sem endereço** enquanto não for o aprovado (`proposta.status = ACEITA`); depois disso, recebe exatas + endereço. O arredondamento é feito **na API**, nunca no front.
+- **Mapa / localização:** quem é do condomínio recebe coordenadas exatas e endereço. O **prestador só recebe coordenadas arredondadas a 2 casas (~1 km) e sem endereço** enquanto não for o aprovado (`proposta.status = ACEITA`). O arredondamento é feito **na API**.
+- **Desativado** (pessoa ou prestador com `ativo = false`): `GET /me` responde **403** (o front mostra "acesso desativado").
 
-## 4. Fluxo do chamado
+## 4. Fluxo da ordem de serviço
 
 ```
-ABERTO ──(admin transfere proposta)──▶ AGUARDANDO_APROVACAO ──(síndico aprova)──▶ EM_EXECUCAO ──▶ CONCLUIDO ──▶ (avaliação)
-  ▲                                        │
-  └──────────(síndico reprova)─────────────┘
-  └────────────── cancelar (admin/síndico, qualquer estado antes de CONCLUIDO) ──▶ CANCELADO
+ABERTO ──(administradora transfere)──▶ AGUARDANDO_APROVACAO ──(aprovador aprova)──▶ EM_EXECUCAO ──▶ CONCLUIDO ──▶ (avaliação)
+  │  ▲                                     │                                           │ NF (se exigida)
+  │  └──────────(aprovador reprova)────────┘                                           └ conclusão exige comprovante de pagamento
+  └──(administradora aprova direto, quando o condomínio não tem aprovador)──▶ EM_EXECUCAO
+  cancelar (gestores, em qualquer estado antes de CONCLUIDO) ──▶ CANCELADO
 ```
 
-- **Prazo de propostas** (`prazoPropostasAte`): NORMAL = criação + 48 h; URGENTE = definido na abertura. Depois do prazo, o servidor recusa novas propostas.
-- **Mínimo de 3 propostas:** o sistema *avisa* (campo `alertaPoucasPropostas` na resposta) quando há menos de 3; não bloqueia.
-- **Urgente** = imediato: destaque visual e ordenação no topo do mural (não há push, ver seção 9).
-- Ao aprovar: a proposta vira `ACEITA`, **todas as demais viram `RECUSADA` de uma vez** (o síndico não reprova uma por uma; a confirmação informa quantas serão recusadas), chamado vai para `EM_EXECUCAO`. `GET /chamados/:id/whatsapp` devolve o link `wa.me` do prestador com mensagem pré-pronta; **quem envia é o condomínio/administradora**, a mensagem não sai do sistema.
-- **Reprovar** (síndico, só a proposta `TRANSFERIDA`, motivo opcional em `propostas.motivo_recusa`): a proposta vira `RECUSADA`, o chamado volta para `ABERTO` e a administradora transfere outra. As demais propostas continuam em disputa. Evento `REPROVADA` (marco). Depois do prazo não entram propostas novas, mas a administradora ainda pode transferir uma das existentes.
-- Só existe **1 proposta TRANSFERIDA/ACEITA por chamado** (índice único parcial, ver schema).
-- **Formulário para o prestador:** quem abre o chamado pode anexar formulários (`anexos.tipo = FORMULARIO`: PDF, DOCX ou XLSX, até 5 MB). Se o chamado tiver formulário, **a proposta só é aceita com pelo menos um arquivo devolvido** (`anexos.tipo = PROPOSTA`, ligado a `proposta_id`; JPG/PNG/PDF/DOCX/XLSX). Ao editar a proposta, os arquivos já enviados contam. O prestador baixa o formulário no mural; ADMIN/SINDICO veem os arquivos devolvidos na comparação.
-- Só se avalia chamado `CONCLUIDO`, 1 avaliação por chamado.
+- **Prazo de propostas** (`prazoPropostasAte`): NORMAL = criação + 48 h; URGENTE = `prazoUrgenteHoras` informado na abertura (a tela oferece 1/2/4/8 h, padrão 2 h). Depois do prazo, o servidor recusa propostas novas, mas a administradora ainda pode transferir uma existente.
+- **Mínimo de 3 propostas:** o sistema *avisa*; não bloqueia.
+- **Urgente** = imediato: destaque e ordenação no topo (sem push, ver seção 9).
+- **Aprovar:** a proposta vira `ACEITA`, **todas as demais viram `RECUSADA` de uma vez**, ordem vai para `EM_EXECUCAO`. `GET /ordens/:id/whatsapp` devolve o link `wa.me` do prestador com mensagem pronta; quem envia é o condomínio/administradora.
+- **Reprovar** (só a proposta `TRANSFERIDA`, motivo opcional em `propostas.motivo_recusa`): proposta `RECUSADA`, ordem volta para `ABERTO`, evento `REPROVADA` (marco). As demais continuam em disputa.
+- Só existe **1 proposta TRANSFERIDA/ACEITA por ordem** (índice único parcial).
+- **Formulário para o prestador:** quem abre pode anexar formulários (`FORMULARIO`: PDF/DOCX/XLSX). Se houver, **a proposta só é aceita com pelo menos um arquivo devolvido** (`PROPOSTA`, ligado a `proposta_id`); ao editar, os já enviados contam. Senão 409 `FORMULARIO_OBRIGATORIO`.
+- **Nota fiscal:** `exige_nota_fiscal` é definido na abertura. O prestador da proposta `ACEITA` anexa (`NOTA_FISCAL`, evento `NOTA_FISCAL_ENVIADA`). Enquanto faltar, concluir responde 409 `NOTA_FISCAL_PENDENTE`.
+- **Concluir** exige **comprovante de pagamento** (`PAGAMENTO`, multipart `comprovantes` em `PATCH /ordens/:id/concluir`), visível também ao prestador.
+- **Comprovação do serviço** (opcional): só o prestador da proposta `ACEITA`, com a ordem em `EM_EXECUCAO` ou `CONCLUIDO`; evento `COMPROVACAO_ENVIADA`. Não bloqueia a conclusão.
+- **Avaliação:** só ordem `CONCLUIDO`, 1 por ordem, nota 1–5 + comentário.
 - Aprovar prestador exige `emiteNotaFiscal = true`.
-- **Comprovação do serviço** (opcional): só o prestador da proposta `ACEITA`, com o chamado em `EM_EXECUCAO` ou `CONCLUIDO`, envia fotos (JPG/PNG) ou PDF (até 5 MB cada). Vira `anexos(tipo = COMPROVACAO)` + evento `COMPROVACAO_ENVIADA`. Não bloqueia a conclusão do chamado.
-- **Linha do tempo:** todo service que muda estado, transfere/aprova/reprova proposta ou anexa comprovação grava `chamado_eventos` **na mesma transação**. Marcos (`marco = true`): abertura, 3ª proposta (mínimo atingido), aprovação, reprovação, conclusão, cancelamento.
+- **Linha do tempo:** todo service que muda estado, transfere/aprova/reprova ou anexa NF/comprovação grava `ordem_eventos` **na mesma transação**. Marcos (`marco = true`): abertura, 3ª proposta, aprovação, reprovação, conclusão, cancelamento.
 
 ## 5. Requisitos
 
@@ -84,36 +98,39 @@ ABERTO ──(admin transfere proposta)──▶ AGUARDANDO_APROVACAO ──(sí
 
 | Cód. | Descrição |
 |---|---|
-| RF01 | Cadastrar/gerenciar usuários (admin, síndico, fiscal, zelador) |
-| RF02 | Abrir chamado: tipo de serviço (título), categoria, local, urgência, descrição |
+| RF01 | Cadastrar/gerenciar pessoas (administradora, síndico, fiscal, zelador) com perfil por condomínio, condomínios (com aprovador) e tipos de serviço |
+| RF02 | Abrir ordem de serviço: título, um ou mais tipos de serviço, local, urgência, descrição, exigir nota fiscal (sim/não) |
 | RF02a | Foto opcional; front incentiva o envio (foto agiliza a manutenção) |
 | RF03 | Comparar propostas lado a lado (valor, prazo de execução, disponibilidade, nota do prestador) |
-| RF04 | Admin transfere proposta; síndico aprova (aceite final, **independe do valor**) |
+| RF04 | Administradora transfere a proposta; o aprovador do condomínio aprova (aceite final, **independe do valor**). Sem aprovador definido, a administradora aprova direto |
 | RF05 | Buscar/filtrar prestadores por categoria |
-| RF06 | Avaliar prestador: **nota geral 1–5** + comentário, por quem contratou (síndico ou admin) |
+| RF06 | Avaliar prestador: **nota geral 1–5** + comentário, por um gestor (administradora, síndico ou aprovador) |
 | RF06b | Avaliações visíveis a síndicos e admin, nunca a moradores |
-| RF07 | Concluir ou cancelar chamado |
-| RF08 | Histórico de chamados com status |
-| RF09 | Prestador só entra após **pré-cadastro + aprovação** da admin |
+| RF07 | Concluir (com comprovante de pagamento) ou cancelar ordem de serviço |
+| RF08 | Histórico de ordens de serviço com situação |
+| RF09 | Prestador entra por **autocadastro + aprovação** da administradora, ou cadastrado por ela (já aprovado); pode ser desativado/reativado |
 | RF09a | Cadastro de prestador informa se emite nota fiscal (obrigatório); aprovação exige "sim" |
 | RF10 | Prestador se cadastra por e-mail + senha ou Google (Clerk), depois informa telefone/WhatsApp, categorias, área de atuação e nota fiscal |
 | RF12 | Prestador vê mural filtrado pelas suas categorias |
 | RF13 | Proposta: valor, data/hora de disponibilidade, tempo de execução (todos obrigatórios) |
 | RF14 | Editar/cancelar proposta antes do aceite |
 | RF15 | Prestador acompanha aceite/recusa **no painel** (sem push, ver seção 9) |
-| RF16 | Histórico de chamados atendidos pelo prestador |
+| RF16 | Histórico de ordens de serviço atendidas pelo prestador |
 | RF17 | Link `wa.me` com mensagem pré-pronta ao aprovar (é também o "aviso" ao prestador) |
 | RF18 | Média de avaliação por prestador mantida automaticamente |
 | RF20 | Controle de acesso por perfil (seção 3) |
 | RF21 | Urgente tratado como imediato (destaque + prioridade) |
 | RF22 | Prazo de propostas: normal até 48 h; urgente imediato |
 | RF23 | Aviso quando houver menos de 3 propostas |
-| RF24 | Categoria TI disponível, marcada "uso interno" (só ADMIN) |
-| RF25 | **Mapa do local** no chamado (OpenStreetMap, sem chave de API); prestador vê só a região aproximada até ser aprovado |
+| RF24 | Tipo de serviço de "uso interno" (ex.: TI), só a administradora abre; tipos liberados para o zelador |
+| RF25 | **Mapa do local** na ordem de serviço (OpenStreetMap, sem chave de API); prestador vê só a região aproximada até ser aprovado |
 | RF26 | **Comprovação do serviço**: quem atendeu pode enviar fotos/PDF (opcional) |
-| RF27 | **Histórico** (linha do tempo) do chamado, com marcos em destaque |
+| RF27 | **Histórico** (linha do tempo) da ordem de serviço, com marcos em destaque |
 | RF28 | **Formulário** anexado na abertura (PDF/DOCX/XLSX); prestador devolve preenchido junto da proposta (obrigatório quando houver formulário) |
-| RF29 | Síndico **reprova** a proposta transferida (motivo opcional); chamado volta para a administradora |
+| RF29 | Aprovador **reprova** a proposta transferida (motivo opcional); a ordem volta para a administradora |
+| RF30 | **Nota fiscal**: se a ordem exige, o prestador aprovado anexa e a conclusão fica travada até lá |
+| RF31 | **Comprovante de pagamento** obrigatório na conclusão, visível ao prestador |
+| RF32 | **Perfil por condomínio** e troca de perfil ativo ("Atuando como") |
 
 Substituições em relação ao rascunho anterior: RF11 (login por celular+senha) virou e-mail+senha **ou Google** no Clerk; RF19 (notificar prestadores) virou o link do WhatsApp (RF17); RF06a (3 critérios) virou nota geral única.
 
@@ -125,7 +142,7 @@ Substituições em relação ao rascunho anterior: RF11 (login por celular+senha
 | RNF02 | Endpoints principais respondem em < 2 s |
 | RNF03 | Senhas e sessões **delegadas ao Clerk** (a API nunca vê senha) |
 | RNF04 | HTTPS em todo tráfego (Render e Vercel já fornecem) |
-| RNF05 | Upload: até 5 MB por arquivo; tipos por uso (fotos JPG/PNG; comprovação +PDF; formulário PDF/DOCX/XLSX) |
+| RNF05 | Upload: até 5 MB por arquivo; tipos por uso (fotos JPG/PNG; formulário PDF/DOCX/XLSX; comprovação, NF e pagamento JPG/PNG/PDF) |
 | RNF06 | Compatível com Chrome, Firefox, Edge e Safari |
 | RNF07 | Suportar 50+ usuários simultâneos |
 | RNF08 | Código versionado em Git |
@@ -133,15 +150,16 @@ Substituições em relação ao rascunho anterior: RF11 (login por celular+senha
 
 ## 6. Autenticação e usuários (Clerk)
 
-- Clerk **free**: senha, e-mail e login social (Google) ok; **login por SMS/celular é pago** e roles customizadas não existem no plano free. Por isso: login = e-mail + senha **ou Google**, e **o perfil vive na tabela `usuarios`** (fonte de verdade), não em claims do Clerk.
-- **Login por celular (avaliado em set/2026):** o SMS do Clerk exige o plano Pro (US$ 25/mês) mais tarifa por mensagem ("taxa de mercado" fora de EUA/Canadá); por padrão só EUA e Canadá estão habilitados na lista de países, e o Brasil não aparece listado nas páginas consultadas. Custo recorrente incompatível com o escopo; o celular fica só como dado de contato. Alternativa gratuita para "entrar sem senha": **código de 6 dígitos por e-mail** (disponível no plano Hobby; método `signIn.emailCode`). Ainda **não** implementado; requer testar no dashboard se convive com a senha ativa. Login por WhatsApp exigiria a API oficial (custo e aprovação) — descartado.
-- A tela de login/cadastro é **própria** (feita no front com a API de fluxos customizados do Clerk). Para a API isso é transparente: só valida o token da sessão.
-- **Vínculo por e-mail:** quem entra com Google usa o e-mail verificado pelo Google; o casamento com o pré-cadastro (síndico/fiscal/zelador) é por esse e-mail, então só confie em e-mail **verificado** (`email_verified`/endereço verificado no Clerk).
-- O front envia `Authorization: Bearer <token da sessão Clerk>`. A API valida com `clerkMiddleware()` e, em seguida, um middleware `carregarUsuario` busca `usuarios` por `clerk_user_id` e injeta `req.usuario` (perfil + condomínios).
-- Usuários internos (síndico, fiscal, zelador, admin) são **pré-cadastrados pela admin** (`usuarios` com `clerk_user_id = null`) e convidados por e-mail. No 1º login, o `carregarUsuario` casa pelo e-mail verificado e grava o `clerk_user_id`.
-- **Prestador** se cadastra sozinho: usuário Clerk sem linha em `usuarios` só pode chamar `POST /prestadores/cadastro`, que cria `usuarios(PRESTADOR)` + `prestadores(PENDENTE)`. Sem aprovação da admin ele não vê o mural.
-- **Primeiro ADMIN:** `npm run seed` cria a linha a partir de `SEED_ADMIN_EMAIL` e as categorias iniciais.
-- Autorização: middleware `exigirPerfil(...)` por rota + **filtro de condomínio nos services** (nunca só no controller).
+- Clerk **free**: senha, e-mail e login social (Google); **login por SMS/celular é pago** e roles customizadas não existem no plano free. Por isso: login = e-mail + senha **ou Google**, e **o perfil vive no banco** (`usuarios.administradora`, `vinculos_condominio`, `prestadores`), não em claims do Clerk.
+- **Login por celular (avaliado em set/2026):** o SMS do Clerk exige o plano Pro (US$ 25/mês) mais tarifa por mensagem; o Brasil não aparece na lista padrão de países. O celular fica só como dado de contato. Alternativa gratuita: **código de 6 dígitos por e-mail** (`signIn.emailCode`), ainda **não** implementado. Login por WhatsApp exigiria a API oficial — descartado.
+- A tela de login/cadastro é **própria** (front, fluxos customizados do Clerk). Para a API é transparente: só valida o token da sessão.
+- O front envia `Authorization: Bearer <token da sessão Clerk>` e `X-Perfil: <perfil ativo>`. A API valida com `clerkMiddleware()`; o middleware `carregarUsuario` busca `usuarios` por `clerk_user_id` e injeta `req.usuario` (administradora, vínculos, prestador, perfil ativo).
+- **Vínculo por e-mail no 1º login:** pessoas e prestadores cadastrados pela administradora ficam com `clerk_user_id = null`. No 1º login, `carregarUsuario` casa pelo **e-mail verificado** no Clerk (só confie em endereço verificado) e grava o `clerk_user_id`. `contaCriada` (front) = `clerk_user_id` preenchido.
+- **Prestador por autocadastro:** conta Clerk sem linha em `usuarios` só pode chamar `POST /prestadores/cadastro`, que cria `usuarios` + `prestadores(PENDENTE, origem AUTOCADASTRO)`. Sem aprovação ele não vê o mural.
+- **Prestador cadastrado pela administradora:** `POST /prestadores` cria `usuarios` (e-mail) + `prestadores(APROVADO, origem ADMINISTRADORA)`; a conta se liga pelo e-mail no 1º login.
+- `GET /me`: **404** se não há linha em `usuarios` (front manda para o autocadastro); **403** se a pessoa ou o prestador está desativado.
+- **Primeira pessoa da administradora:** `npm run seed` cria a partir de `SEED_ADMIN_EMAIL` (com os tipos de serviço iniciais).
+- Autorização: middleware `exigirPerfil(...)` por rota (perfil ativo) + **regra e filtro de condomínio nos services** (nunca só no controller).
 
 ## 7. Modelo de dados
 
@@ -149,66 +167,68 @@ Schema completo em [prisma/schema.prisma](prisma/schema.prisma). Diagrama, dicio
 
 ```mermaid
 erDiagram
+  USUARIOS ||--o{ VINCULOS_CONDOMINIO : "perfil por condominio"
   CONDOMINIOS ||--o{ VINCULOS_CONDOMINIO : tem
-  USUARIOS ||--o{ VINCULOS_CONDOMINIO : possui
-  USUARIOS ||--o| PRESTADORES : "é (perfil PRESTADOR)"
-  CATEGORIAS ||--o{ PRESTADOR_CATEGORIAS : atende
+  USUARIOS |o--o{ CONDOMINIOS : "aprova propostas"
+  USUARIOS ||--o| PRESTADORES : "conta do prestador"
   PRESTADORES ||--o{ PRESTADOR_CATEGORIAS : atende
-  CONDOMINIOS ||--o{ CHAMADOS : possui
-  CATEGORIAS ||--o{ CHAMADOS : classifica
-  USUARIOS ||--o{ CHAMADOS : abre
-  CHAMADOS ||--o{ ANEXOS : tem
-  CHAMADOS ||--o{ PROPOSTAS : recebe
+  CATEGORIAS ||--o{ PRESTADOR_CATEGORIAS : "tipo de servico"
+  CONDOMINIOS ||--o{ ORDENS_SERVICO : possui
+  USUARIOS ||--o{ ORDENS_SERVICO : abre
+  ORDENS_SERVICO ||--|{ ORDEM_CATEGORIAS : envolve
+  CATEGORIAS ||--o{ ORDEM_CATEGORIAS : classifica
+  ORDENS_SERVICO ||--o{ ANEXOS : tem
+  ORDENS_SERVICO ||--o{ ORDEM_EVENTOS : "linha do tempo"
+  ORDENS_SERVICO ||--o{ PROPOSTAS : recebe
   PRESTADORES ||--o{ PROPOSTAS : envia
-  CHAMADOS ||--o| AVALIACOES : gera
+  ORDENS_SERVICO ||--o| AVALIACOES : gera
   PRESTADORES ||--o{ AVALIACOES : recebe
-  USUARIOS ||--o{ AVALIACOES : avalia
 ```
 
 Pontos de atenção:
-- `mediaAvaliacao`/`totalAvaliacoes` em `prestadores` são desnormalizados: atualizar **na mesma transação** que grava a avaliação.
-- Constraints em SQL (CHECK de nota 1–5, valor > 0, tamanho ≤ 5 MB, índice único parcial de proposta selecionada) ficam no topo do schema; incluí-las na primeira migration (`prisma migrate dev --create-only`, editar o SQL, depois aplicar).
-- Anexos: guardar só `storagePath`; a API gera **URL assinada** (curta duração) ao devolver o chamado.
-- IDs são UUID; `chamados.numero` é o protocolo legível.
+- `mediaAvaliacao`/`totalAvaliacoes` em `prestadores` são desnormalizados: atualizar **na mesma transação** que grava a avaliação. `totalServicos` é derivado (ordens `CONCLUIDO` com a proposta dele `ACEITA`).
+- Constraints em SQL (CHECKs, mime por tipo de anexo, índice único parcial, sequência do protocolo a partir de 101) ficam no fim da migration inicial; o topo do schema lista todas.
+- O e-mail e o nome do contato do prestador ficam em `usuarios` (a conta); o serializer monta `Prestador.email`/`nomeContato`.
+- Anexos: guardar só `storagePath` (`ordens/{id}/{pasta}/…`); a API gera **URL assinada** (curta duração) ao devolver a ordem.
+- IDs são UUID; `ordens_servico.numero` é o protocolo legível (#101).
+- **Seeds:** `npm run seed` (tipos de serviço + 1ª pessoa da administradora, idempotente) e `npm run seed:demo` (mesmos dados do mock do front; exige banco sem ordens — `npx prisma migrate reset` antes).
 
-## 8. API (rascunho)
+## 8. API
 
 Prefixo `/api`. Toda rota exige sessão Clerk, exceto `GET /api/health` (consulta o banco; usado pelo health check do Render e pelo ping que mantém Render/Supabase acordados).
-Respostas seguem os tipos de `front/types/index.ts` (serializer por módulo: `Decimal` → `number`, datas ISO).
+**Contrato: as funções de `front/lib/services.ts`** (rota, corpo e resposta tipados por `front/types/index.ts`). Serializer por módulo: `Decimal` → `number`, datas ISO, objetos aninhados prontos.
 
-| Método e rota | Perfis | Descrição |
+| Método e rota | Quem | Descrição |
 |---|---|---|
-| `GET /me` | todos | Usuário atual, perfil, condomínios |
-| `POST /prestadores/cadastro` | Clerk sem vínculo | Auto-cadastro do prestador |
-| `GET/POST/PATCH /usuarios` | ADMIN | CRUD e vínculos com condomínios |
-| `GET/POST/PATCH /condominios` | ADMIN | CRUD |
-| `GET /categorias` | todos | Lista (TI só para ADMIN) |
-| `GET /prestadores`, `GET /prestadores/:id` | ADMIN, SINDICO | Busca por categoria/status; detalhe com avaliações |
-| `PATCH /prestadores/:id/aprovar` · `/bloquear` | ADMIN | Exige nota fiscal para aprovar |
-| `PATCH /prestadores/me` | PRESTADOR | Editar o próprio cadastro |
-| `POST /chamados` · `GET /chamados` · `GET /chamados/:id` | conforme seção 3 | Abrir, listar (com escopo), detalhar. **A listagem é paginada** (`?page=1&pageSize=5&busca=&categoriaId=&situacao=`) e devolve `{ itens, total }`; cada item traz `totalPropostas`, **`menorValor`** (menor proposta ainda em disputa) e **`valorContratado`** (proposta `ACEITA`), usados no card da lista |
-| `POST /chamados/:id/anexos` | quem abriu | Upload de foto da abertura: JPG/PNG ≤ 5 MB |
-| `POST /chamados/:id/formularios` | quem abriu (enquanto `ABERTO` e sem propostas) | Formulário para o prestador: PDF/DOCX/XLSX ≤ 5 MB, 1 por requisição |
-| `POST /chamados/:id/comprovacoes` | PRESTADOR aprovado | Upload de comprovação: JPG/PNG/PDF ≤ 5 MB, 1 arquivo por requisição |
-| `PATCH /chamados/:id/cancelar` · `/concluir` | ADMIN, SINDICO | |
-| `GET /chamados/:id/propostas` | ADMIN, SINDICO | Comparação (cartão por prestador). Cada proposta traz o prestador com `mediaAvaliacao`, `totalAvaliacoes` e **`totalServicos`** (chamados concluídos em que ele foi o `ACEITA`) |
-| `GET /prestadores/:id/historico` | ADMIN, SINDICO | Painel da tela de avaliação: `{ media, totalServicos, porCategoria[], prazoCumprido: { cumpridos, total }, ultimoServicoEm }`. **Prazo cumprido** = concluídos com `concluido_em <= disponivel_em + tempo_execucao_horas` da proposta aceita; nada novo no banco, é derivado |
-| `GET /chamados/:id` | conforme seção 3 | Inclui `formularios` (URL assinada, visíveis também ao prestador no mural), `localizacao` (`{ precisao: EXATA\|APROXIMADA, latitude, longitude, endereco? }` já filtrada pelo perfil), `comprovacoes` (URL assinada) e `eventos` (linha do tempo) |
-| `POST /chamados/:id/transferir` | ADMIN | `{ propostaId }` → AGUARDANDO_APROVACAO |
-| `POST /chamados/:id/aprovar` | SINDICO | `{ propostaId }` → EM_EXECUCAO; demais propostas `RECUSADA` |
-| `POST /chamados/:id/reprovar` | SINDICO | `{ propostaId, motivo? }` → proposta `RECUSADA`, chamado volta para ABERTO |
-| `GET /chamados/:id/whatsapp` | ADMIN, SINDICO | Link `wa.me` pré-preenchido |
-| `GET /mural` | PRESTADOR | Chamados abertos das suas categorias |
-| `POST /chamados/:id/propostas` | PRESTADOR | Enviar ou editar (upsert: 1 por prestador/chamado). `multipart/form-data` com os campos + `arquivos` (obrigatório se o chamado tiver formulário e a proposta ainda não tiver arquivo) |
-| `PATCH /propostas/:id/cancelar` | PRESTADOR | Cancelar antes do aceite |
-| `GET /propostas/minhas` | PRESTADOR | Histórico |
-| `POST /chamados/:id/avaliacao` | ADMIN, SINDICO | `{ nota, comentario? }` |
+| `GET /me` | qualquer conta | `MeApi`: `administradora`, `vinculos[{ condominio, perfil }]`, `condominiosAdministrados?`, `prestador?`. 404 sem cadastro; 403 desativado |
+| `POST /prestadores/cadastro` | Clerk sem cadastro | Autocadastro → `PENDENTE` |
+| `GET/PATCH /prestadores/me` | PRESTADOR | Meu cadastro (WhatsApp, tipos de serviço, área) |
+| `GET /categorias` (`?todas=1`), `POST`, `PATCH /categorias/:id`, `GET /categorias/uso` | todos lêem; ADMIN grava | Tipos de serviço; `uso` = quantos prestadores atendem cada um |
+| `GET/POST /condominios`, `GET/PATCH /condominios/:id` | ADMIN | Com `aprovadorId` (pessoa ativa vinculada ou `null`) |
+| `GET/POST /pessoas`, `GET/PATCH /pessoas/:id` | ADMIN | E-mail único, `administradora`, `vinculos[]`, `ativo`; 409 `PESSOA_E_APROVADORA` ao desativar/desvincular o aprovador |
+| `GET /prestadores` (`busca`, `categoriaId`, `situacao=PENDENTE\|ATIVO\|INATIVO`), `GET /prestadores/:id` | ADMIN, SINDICO | Lista e detalhe |
+| `POST /prestadores`, `PATCH /prestadores/:id` | ADMIN | Cadastro pela administradora (já `APROVADO`) e edição |
+| `PATCH /prestadores/:id/aprovar` · `/desativar` (`{ motivo }`) · `/reativar` | ADMIN | Aprovar exige nota fiscal |
+| `GET /prestadores/:id/historico` | ADMIN, SINDICO | `{ media, totalServicos, porCategoria[], prazoCumprido, ultimoServicoEm }`. Prazo cumprido = `concluido_em <= disponivel_em + tempo_execucao_horas` da proposta aceita |
+| `POST /ordens` · `GET /ordens` · `GET /ordens/:id` | conforme seção 3 | Abrir (`categoriaIds[]`, `exigeNotaFiscal`, `prazoUrgenteHoras?`), listar com escopo do perfil ativo (urgentes primeiro; `totalPropostas`, `menorValor`, `valorContratado`), detalhar (`localizacao` filtrada, `eventos`, anexos com URL assinada, `minhaProposta` para prestador) |
+| `POST /ordens/:id/anexos` · `/formularios` | quem abriu | Fotos (JPG/PNG, máx. 6) e formulário (PDF/DOCX/XLSX, enquanto `ABERTO` e sem propostas); 1 arquivo por requisição |
+| `POST /ordens/:id/comprovacoes` · `/notas-fiscais` | prestador da proposta `ACEITA` | JPG/PNG/PDF |
+| `POST /ordens/:id/transferir` | ADMIN | `{ propostaId }` → `AGUARDANDO_APROVACAO` |
+| `POST /ordens/:id/aprovar` · `/reprovar` | aprovador (ou ADMIN se o condomínio não tem aprovador) | `{ propostaId }` / `{ propostaId, motivo? }` |
+| `PATCH /ordens/:id/concluir` (multipart `comprovantes`) · `/cancelar` | gestores | Concluir exige comprovante de pagamento e, se exigida, a NF |
+| `POST /ordens/:id/avaliacao` | gestores | `{ nota, comentario? }` |
+| `GET /ordens/:id/whatsapp` | gestores | `{ url }` `wa.me` com mensagem pronta |
+| `GET /mural` | PRESTADOR | Ordens abertas de qualquer tipo que ele atende |
+| `POST /ordens/:id/propostas` | PRESTADOR | Upsert, `multipart/form-data` (campos + `arquivos`) |
+| `PATCH /propostas/:id/cancelar` | PRESTADOR | Antes de `TRANSFERIDA/ACEITA` |
+| `GET /propostas/minhas` | PRESTADOR | Em andamento / aguardando / encerradas |
 
+Transferir/aprovar/reprovar/concluir/cancelar/avaliar devolvem a `Ordem` atualizada (o front usa o retorno).
 Erros: JSON `{ erro: { codigo, mensagem } }` com status HTTP correto (400 validação, 401, 403 perfil/escopo, 404, 409 regra de negócio).
 
 ## 9. Fora de escopo (v1)
 
-- Notificações push/e-mail/SMS: o único "aviso" ao prestador é o link do WhatsApp aberto pelo condomínio; o resto é consulta no painel.
+- Notificações push/e-mail/SMS: o único "aviso" ao prestador é o link do WhatsApp aberto pelo condomínio; o resto é consulta no painel. Convite de pessoas também é por WhatsApp/texto copiado.
 - Login por celular (SMS pago no Clerk).
 - Acesso de moradores.
 - API oficial do WhatsApp Business.
@@ -222,7 +242,7 @@ src/
   middlewares/             # erro (AppError), auth (clerk + carregarUsuario), exigirPerfil, upload
   lib/                     # prisma.ts, logger.ts, storage/ (supabase | s3), whatsapp.ts
   modules/health/          # GET /api/health
-  modules/<dominio>/       # chamados, propostas, prestadores, avaliacoes, usuarios, condominios, categorias
+  modules/<dominio>/       # me, ordens, propostas, mural, prestadores, pessoas, condominios, categorias
     <dominio>.routes.ts    # rotas + validação Zod
     <dominio>.controller.ts# HTTP apenas
     <dominio>.service.ts   # regra de negócio + escopo (condominio_id)
@@ -231,7 +251,7 @@ prisma/ (schema.prisma, migrations/, seed.ts)
 ```
 
 - Fluxo: `routes → controller → service → prisma`. Regra de negócio e filtro de escopo **só no service**.
-- Domínio em português (`Chamado`, `Proposta`), infraestrutura em inglês (`middleware`, `env`). Tabelas em snake_case via `@@map`.
+- Domínio em português (`Ordem`, `Proposta`), infraestrutura em inglês (`middleware`, `env`). Tabelas em snake_case via `@@map`.
 - Transições de status centralizadas em uma função (máquina de estados) — não altere `status` direto pelo Prisma fora dela.
 - TypeScript `strict`; ESLint + Prettier; commits em Conventional Commits.
 
@@ -242,7 +262,8 @@ cp .env.example .env            # Clerk/Supabase podem ficar vazios no começo
 npm install                     # também no host: editor, lint e prisma CLI
 docker compose up -d            # Postgres (localhost:5432) + API com hot reload (localhost:3333)
 npx prisma migrate dev          # aplica migrations (do host, via localhost:5432)
-npm run seed                    # categorias + 1º ADMIN (SEED_ADMIN_EMAIL)
+npm run seed                    # tipos de serviço + 1ª pessoa da administradora (SEED_ADMIN_EMAIL)
+npm run seed:demo               # opcional: dados do mock do front (#101–#125); banco sem ordens
 curl localhost:3333/api/health
 ```
 
@@ -280,7 +301,8 @@ Recomendação: **Render** agora (zero custo, zero cartão). Se o cold start atr
 
 ## 13. Premissas a confirmar com a PO
 
-1. Prazo padrão de propostas para chamado **urgente** (sugestão: 2 h) — a entrevista só diz "imediato".
-2. Quem avalia: assumido síndico **ou** admin em nome do condomínio ("contratante").
-3. Síndico pode aprovar direto de `ABERTO`, sem transferência prévia da admin? (hoje: não.)
+1. Prazo padrão de propostas para ordem **urgente** (a tela oferece 1/2/4/8 h, padrão 2 h) — a entrevista só diz "imediato".
+2. Quem avalia: hoje os gestores (administradora, síndico do condomínio ou aprovador), inclusive quando o aprovador é fiscal/zelador.
+3. Aprovador pode aprovar direto de `ABERTO`, sem transferência? (hoje: só quando o condomínio não tem aprovador, ou seja, a administradora aprova.)
 4. Exibir o nome do condomínio nas avaliações vistas por outros síndicos? (hoje: não, por LGPD.)
+5. Comprovação depois da conclusão: hoje o prestador ainda pode enviar em `CONCLUIDO`. Manter?

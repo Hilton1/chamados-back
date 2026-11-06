@@ -1,23 +1,24 @@
 erDiagram
-  CONDOMINIOS ||--o{ VINCULOS_CONDOMINIO : "escopo de acesso"
+  CONDOMINIOS ||--o{ VINCULOS_CONDOMINIO : "perfil por condominio"
   USUARIOS ||--o{ VINCULOS_CONDOMINIO : possui
-  USUARIOS ||--o| PRESTADORES : "perfil PRESTADOR"
-  USUARIOS ||--o{ PRESTADORES : "aprova (admin)"
-  CATEGORIAS ||--o{ PRESTADOR_CATEGORIAS : "especialidade"
+  USUARIOS |o--o{ CONDOMINIOS : "aprova propostas"
+  USUARIOS ||--o| PRESTADORES : "conta do prestador"
+  USUARIOS ||--o{ PRESTADORES : "aprova (administradora)"
+  CATEGORIAS ||--o{ PRESTADOR_CATEGORIAS : "tipo de servico"
   PRESTADORES ||--o{ PRESTADOR_CATEGORIAS : atende
-  CONDOMINIOS ||--o{ CHAMADOS : possui
-  CATEGORIAS ||--o{ CHAMADOS : classifica
-  USUARIOS ||--o{ CHAMADOS : abre
-  USUARIOS ||--o{ CHAMADOS : "aprova (sindico)"
-  CHAMADOS ||--o{ ANEXOS : tem
+  CONDOMINIOS ||--o{ ORDENS_SERVICO : possui
+  USUARIOS ||--o{ ORDENS_SERVICO : abre
+  ORDENS_SERVICO ||--|{ ORDEM_CATEGORIAS : envolve
+  CATEGORIAS ||--o{ ORDEM_CATEGORIAS : classifica
+  ORDENS_SERVICO ||--o{ ANEXOS : tem
   PROPOSTAS ||--o{ ANEXOS : "arquivos da proposta"
   USUARIOS ||--o{ ANEXOS : envia
-  CHAMADOS ||--o{ CHAMADO_EVENTOS : "linha do tempo"
-  USUARIOS ||--o{ CHAMADO_EVENTOS : "autor"
-  CHAMADOS ||--o{ PROPOSTAS : recebe
+  ORDENS_SERVICO ||--o{ ORDEM_EVENTOS : "linha do tempo"
+  USUARIOS ||--o{ ORDEM_EVENTOS : autor
+  ORDENS_SERVICO ||--o{ PROPOSTAS : recebe
   PRESTADORES ||--o{ PROPOSTAS : envia
-  USUARIOS ||--o{ PROPOSTAS : "transfere (admin)"
-  CHAMADOS ||--o| AVALIACOES : gera
+  USUARIOS ||--o{ PROPOSTAS : "transfere (administradora)"
+  ORDENS_SERVICO ||--o| AVALIACOES : gera
   PRESTADORES ||--o{ AVALIACOES : recebe
   USUARIOS ||--o{ AVALIACOES : avalia
 
@@ -32,25 +33,28 @@ erDiagram
     decimal latitude "mapa"
     decimal longitude "mapa"
     bool ativo
+    uuid aprovador_id FK "null = administradora aprova"
   }
   USUARIOS {
     uuid id PK
     string clerk_user_id UK "null ate o 1o login"
     string nome
-    string email UK
+    string email UK "minusculo"
     string telefone
-    enum perfil "ADMIN SINDICO FISCAL ZELADOR PRESTADOR"
-    bool ativo
+    bool administradora "perfil ADMIN"
+    bool ativo "soft delete"
   }
   VINCULOS_CONDOMINIO {
     uuid usuario_id PK,FK
     uuid condominio_id PK,FK
+    enum perfil "SINDICO FISCAL ZELADOR"
   }
   CATEGORIAS {
     uuid id PK
     string slug UK
-    string nome
-    bool interna "TI = uso interno"
+    string nome UK
+    bool interna "so a administradora abre"
+    bool zelador_pode_abrir
     bool ativa
   }
   PRESTADORES {
@@ -61,10 +65,11 @@ erDiagram
     string telefone_whatsapp "E.164"
     bool emite_nota_fiscal
     string area_atuacao
-    enum status "PENDENTE APROVADO BLOQUEADO"
+    enum status "PENDENTE APROVADO"
+    enum origem "AUTOCADASTRO ADMINISTRADORA"
+    bool ativo
+    string motivo_inativacao
     uuid aprovado_por_id FK
-    datetime aprovado_em
-    string motivo_bloqueio
     decimal media_avaliacao "desnormalizado"
     int total_avaliacoes "desnormalizado"
   }
@@ -72,58 +77,62 @@ erDiagram
     uuid prestador_id PK,FK
     uuid categoria_id PK,FK
   }
-  CHAMADOS {
+  ORDENS_SERVICO {
     uuid id PK
-    int numero UK "protocolo"
+    int numero UK "protocolo a partir de 101"
     uuid condominio_id FK
-    uuid categoria_id FK
     uuid criado_por_id FK
+    enum perfil_criador "perfil ativo ao abrir"
     string titulo
     text descricao
     string local
     enum urgencia "NORMAL URGENTE"
     enum status "ABERTO AGUARDANDO_APROVACAO EM_EXECUCAO CONCLUIDO CANCELADO"
     datetime prazo_propostas_ate
+    bool exige_nota_fiscal
     uuid aprovado_por_id FK
-    datetime aprovado_em
-    datetime concluido_em
-    datetime cancelado_em
+    uuid concluido_por_id FK
+    uuid cancelado_por_id FK
     string motivo_cancelamento
+  }
+  ORDEM_CATEGORIAS {
+    uuid ordem_id PK,FK
+    uuid categoria_id PK,FK
   }
   ANEXOS {
     uuid id PK
-    uuid chamado_id FK
+    uuid ordem_id FK
     uuid proposta_id FK "so no tipo PROPOSTA"
-    enum tipo "ABERTURA FORMULARIO PROPOSTA COMPROVACAO"
+    enum tipo "ABERTURA FORMULARIO PROPOSTA COMPROVACAO NOTA_FISCAL PAGAMENTO"
     uuid enviado_por_id FK
     string nome_original
     string storage_path
-    string mime_type "jpeg png pdf docx xlsx"
-    int tamanho_bytes
+    string mime_type
+    int tamanho_bytes "ate 5 MB"
   }
-  CHAMADO_EVENTOS {
+  ORDEM_EVENTOS {
     uuid id PK
-    uuid chamado_id FK
-    enum tipo "ABERTO PROPOSTA_RECEBIDA TRANSFERIDA APROVADA REPROVADA COMPROVACAO_ENVIADA CONCLUIDO CANCELADO AVALIADO"
+    uuid ordem_id FK
+    enum tipo "ABERTO ... NOTA_FISCAL_ENVIADA ... AVALIADO"
     uuid autor_id FK "null = sistema"
     string texto
     bool marco "destaque na tela"
   }
   PROPOSTAS {
     uuid id PK
-    uuid chamado_id FK
+    uuid ordem_id FK
     uuid prestador_id FK
     decimal valor
     datetime disponivel_em
     int tempo_execucao_horas
     string observacao
     enum status "ENVIADA TRANSFERIDA ACEITA RECUSADA CANCELADA"
-    string motivo_recusa "reprovacao do sindico"
+    string motivo_recusa "reprovacao"
     uuid transferida_por_id FK
   }
   AVALIACOES {
     uuid id PK
-    uuid chamado_id UK,FK
+    uuid ordem_id UK,FK
     uuid prestador_id FK
     uuid avaliador_id FK
     smallint nota "1 a 5"
