@@ -1,6 +1,7 @@
 // Variáveis de ambiente validadas uma única vez na subida. O resto do código importa `env` daqui,
 // nunca lê `process.env` direto.
 import { z } from "zod";
+import { ajustarUrlPooler } from "./database-url.js";
 
 const vazioComoUndefined = (v: unknown) => (v === "" ? undefined : v);
 const opcional = z.preprocess(vazioComoUndefined, z.string().optional());
@@ -23,7 +24,7 @@ const schema = z
           .filter(Boolean),
       ),
 
-    DATABASE_URL: z.string().min(1),
+    DATABASE_URL: z.string().min(1).transform(ajustarUrlPooler),
     DIRECT_URL: opcional,
 
     // Clerk. Opcionais em desenvolvimento para a API subir antes das chaves existirem;
