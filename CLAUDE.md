@@ -33,7 +33,7 @@ O front já tem o fluxo completo em modo mock. **O contrato da API é [front/lib
 | Mapa | Embed do **OpenStreetMap** no front; coordenadas em `condominios.latitude/longitude` | Sem chave de API e sem custo. Geocodificar o endereço no cadastro do condomínio (ex.: Nominatim, respeitando a política de uso) ou preencher manualmente |
 | Deploy da API | **Render** (Web Service Docker, plano free, [render.yaml](render.yaml)) | Railway descartado (sem plano gratuito utilizável). Render free dorme após 15 min sem tráfego (cold start ~1 min). Imagem Docker = portável para Koyeb/Northflank/Cloud Run. Alternativas na seção 12 |
 | CI/CD | **GitHub Actions** | Lint + typecheck + testes + build em PR; deploy na `main` via *Deploy Hook* do Render |
-| Testes | Vitest + Supertest | Clerk e Prisma mockados nos testes de rota |
+| Testes | Vitest + Supertest | Clerk substituído por um dublê (`tests/setup.ts`); rotas testadas contra um **Postgres de verdade** (banco `chamados_test`, criado e migrado pelo `tests/global-setup.ts`; no CI, serviço `postgres`) |
 
 ## 3. Perfis e permissões
 
@@ -153,8 +153,12 @@ Substituições em relação ao rascunho anterior: RF11 (login por celular+senha
 - Clerk **free**: senha, e-mail e login social (Google); **login por SMS/celular é pago** e roles customizadas não existem no plano free. Por isso: login = e-mail + senha **ou Google**, e **o perfil vive no banco** (`usuarios.administradora`, `vinculos_condominio`, `prestadores`), não em claims do Clerk.
 - **Login por celular (avaliado em set/2026):** o SMS do Clerk exige o plano Pro (US$ 25/mês) mais tarifa por mensagem; o Brasil não aparece na lista padrão de países. O celular fica só como dado de contato. Alternativa gratuita: **código de 6 dígitos por e-mail** (`signIn.emailCode`), ainda **não** implementado. Login por WhatsApp exigiria a API oficial — descartado.
 - A tela de login/cadastro é **própria** (front, fluxos customizados do Clerk). Para a API é transparente: só valida o token da sessão.
-- O front envia `Authorization: Bearer <token da sessão Clerk>` e `X-Perfil: <perfil ativo>`. A API valida com `clerkMiddleware()`; o middleware `carregarUsuario` busca `usuarios` por `clerk_user_id` e injeta `req.usuario` (administradora, vínculos, prestador, perfil ativo).
-- **Vínculo por e-mail no 1º login:** pessoas e prestadores cadastrados pela administradora ficam com `clerk_user_id = null`. No 1º login, `carregarUsuario` casa pelo **e-mail verificado** no Clerk (só confie em endereço verificado) e grava o `clerk_user_id`. `contaCriada` (front) = `clerk_user_id` preenchido.
+- O front envia `Authorization: Bearer <token da sessão Clerk>` e `X-Perfil: <perfil ativo>`. Middlewares em [src/middlewares/auth.ts](src/middlewares/auth.ts):
+  - `clerkSessao()` + `autenticar`: 401 sem sessão; carrega a conta em `req.conta` (`null` = sem cadastro). Todo acesso ao Clerk passa por [src/lib/clerk.ts](src/lib/clerk.ts).
+  - `exigirConta`: 403 `SEM_CADASTRO` / `ACESSO_DESATIVADO` / `SEM_ACESSO`; resolve o perfil ativo (o do `X-Perfil` se a pessoa o tiver, senão o padrão, na mesma ordem do front) e monta `req.ctx = { usuario, perfil, perfis, condominioIds }` (`null` = todos, para ADMIN).
+  - `exigirPerfil(...)`: 403 `PERFIL_SEM_PERMISSAO`.
+  - Só `GET /me`, `POST /prestadores/cadastro` e `GET /categorias` dispensam `exigirConta`.
+- **Vínculo por e-mail no 1º login:** pessoas e prestadores cadastrados pela administradora ficam com `clerk_user_id = null`. No 1º login, `autenticar` casa pelo **e-mail verificado** no Clerk (só confie em endereço verificado) e grava o `clerk_user_id`. `contaCriada` (front) = `clerk_user_id` preenchido.
 - **Prestador por autocadastro:** conta Clerk sem linha em `usuarios` só pode chamar `POST /prestadores/cadastro`, que cria `usuarios` + `prestadores(PENDENTE, origem AUTOCADASTRO)`. Sem aprovação ele não vê o mural.
 - **Prestador cadastrado pela administradora:** `POST /prestadores` cria `usuarios` (e-mail) + `prestadores(APROVADO, origem ADMINISTRADORA)`; a conta se liga pelo e-mail no 1º login.
 - `GET /me`: **404** se não há linha em `usuarios` (front manda para o autocadastro); **403** se a pessoa ou o prestador está desativado.
@@ -206,9 +210,9 @@ Prefixo `/api`. Toda rota exige sessão Clerk, exceto `GET /api/health` (consult
 | `GET /categorias` (`?todas=1`), `POST`, `PATCH /categorias/:id`, `GET /categorias/uso` | todos lêem; ADMIN grava | Tipos de serviço; `uso` = quantos prestadores atendem cada um |
 | `GET/POST /condominios`, `GET/PATCH /condominios/:id` | ADMIN | Com `aprovadorId` (pessoa ativa vinculada ou `null`) |
 | `GET/POST /pessoas`, `GET/PATCH /pessoas/:id` | ADMIN | E-mail único, `administradora`, `vinculos[]`, `ativo`; 409 `PESSOA_E_APROVADORA` ao desativar/desvincular o aprovador |
-| `GET /prestadores` (`busca`, `categoriaId`, `situacao=PENDENTE\|ATIVO\|INATIVO`), `GET /prestadores/:id` | ADMIN, SINDICO | Lista e detalhe |
+| `GET /prestadores` (`busca`, `categoriaId`, `situacao=PENDENTE\|ATIVO\|INATIVO`), `GET /prestadores/:id` | ADMIN, SINDICO | Lista (array, sem paginação, como o front espera: pendentes, ativos, inativos) e detalhe |
 | `POST /prestadores`, `PATCH /prestadores/:id` | ADMIN | Cadastro pela administradora (já `APROVADO`) e edição |
-| `PATCH /prestadores/:id/aprovar` · `/desativar` (`{ motivo }`) · `/reativar` | ADMIN | Aprovar exige nota fiscal |
+| `PATCH /prestadores/:id/aprovar` · `/desativar` (`{ motivo? }`) · `/reativar` | ADMIN | Aprovar exige nota fiscal. Documento novo precisa ter dígitos verificadores válidos; o já gravado é mantido |
 | `GET /prestadores/:id/historico` | ADMIN, SINDICO | `{ media, totalServicos, porCategoria[], prazoCumprido, ultimoServicoEm }`. Prazo cumprido = `concluido_em <= disponivel_em + tempo_execucao_horas` da proposta aceita |
 | `POST /ordens` · `GET /ordens` · `GET /ordens/:id` | conforme seção 3 | Abrir (`categoriaIds[]`, `exigeNotaFiscal`, `prazoUrgenteHoras?`), listar com escopo do perfil ativo (urgentes primeiro; `totalPropostas`, `menorValor`, `valorContratado`), detalhar (`localizacao` filtrada, `eventos`, anexos com URL assinada, `minhaProposta` para prestador) |
 | `POST /ordens/:id/anexos` · `/formularios` | quem abriu | Fotos (JPG/PNG, máx. 6) e formulário (PDF/DOCX/XLSX, enquanto `ABERTO` e sem propostas); 1 arquivo por requisição |
@@ -225,6 +229,8 @@ Prefixo `/api`. Toda rota exige sessão Clerk, exceto `GET /api/health` (consult
 
 Transferir/aprovar/reprovar/concluir/cancelar/avaliar devolvem a `Ordem` atualizada (o front usa o retorno).
 Erros: JSON `{ erro: { codigo, mensagem } }` com status HTTP correto (400 validação, 401, 403 perfil/escopo, 404, 409 regra de negócio).
+Códigos em uso: `NAO_AUTENTICADO`, `SEM_CADASTRO`, `ACESSO_DESATIVADO`, `SEM_ACESSO`, `PERFIL_SEM_PERMISSAO`, `VALIDACAO`, `NAO_ENCONTRADO`, `CATEGORIA_DUPLICADA`, `CATEGORIA_INVALIDA`, `APROVADOR_INVALIDO`, `CNPJ_DUPLICADO`, `CONDOMINIO_INVALIDO`, `EMAIL_DUPLICADO`, `PESSOA_E_APROVADORA`, `PROPRIA_CONTA`, `DOCUMENTO_DUPLICADO`, `DOCUMENTO_INVALIDO`, `SEM_NOTA_FISCAL`, `JA_CADASTRADO`, `EMAIL_NAO_VERIFICADO`.
+Telefones são aceitos com ou sem máscara/`+55` e gravados só com dígitos (`5582999990001`).
 
 ## 9. Fora de escopo (v1)
 
@@ -271,6 +277,7 @@ curl localhost:3333/api/health
 - Mudou `package.json`? `docker compose up -d --build api` (o `node_modules` do contêiner é separado do host).
 - Logs: `docker compose logs -f api`. Banco: `npm run db:studio`. `docker compose down -v` apaga o banco local.
 - Verificações (as mesmas do CI): `npm run lint && npm run typecheck && npm test && npm run build`.
+- `npm test` precisa do Postgres do compose no ar: usa o banco `chamados_test` (criado e migrado sozinho; outro endereço via `TEST_DATABASE_URL`) e o limpa a cada teste. O banco de dev (`chamados`) não é tocado.
 - Anexos não rodam local: preencha `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` de um projeto Supabase de dev (bucket privado `anexos`). Sem isso a API sobe, só o upload falha.
 - Clerk: [docs/clerk-setup.md](docs/clerk-setup.md). Sem as chaves, a API sobe (só `/api/health` funciona até a Etapa 1).
 

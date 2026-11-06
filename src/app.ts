@@ -11,8 +11,10 @@ import {
   categoriasPublicasRoutes,
   categoriasRoutes,
 } from "./modules/categorias/categorias.routes.js";
+import { condominiosRoutes } from "./modules/condominios/condominios.routes.js";
 import { healthRoutes } from "./modules/health/health.routes.js";
 import { meRoutes } from "./modules/me/me.routes.js";
+import { pessoasRoutes } from "./modules/pessoas/pessoas.routes.js";
 import { autocadastroRoutes, prestadoresRoutes } from "./modules/prestadores/prestadores.routes.js";
 
 export function criarApp() {
@@ -41,7 +43,7 @@ export function criarApp() {
 
   // Daqui em diante: conta ativa + perfil ativo (X-Perfil) em req.ctx.
   api.use(exigirConta);
-  api.use(categoriasRoutes, prestadoresRoutes);
+  api.use(categoriasRoutes, condominiosRoutes, pessoasRoutes, prestadoresRoutes);
 
   app.use("/api", api);
   app.use(naoEncontrado);

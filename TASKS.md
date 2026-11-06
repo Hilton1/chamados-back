@@ -10,7 +10,7 @@ Princípios que valem para todas as etapas:
 - Toda rota: schema Zod → controller (só HTTP) → service (regra + escopo) → Prisma.
 - **Respostas no formato de `front/types/index.ts`**: cada módulo tem um *serializer* que converte `Decimal` → `number`, datas → ISO, e monta os objetos aninhados (`prestador`, `condominio`…). O front não deve precisar converter nada.
 - Mudança de status só pela máquina de estados + evento em `chamado_eventos` **na mesma transação**.
-- Cada endpoint entra com teste (Vitest + Supertest; Clerk mockado; banco de teste no Docker).
+- Cada endpoint entra com teste (Vitest + Supertest; dublê do Clerk em `tests/setup.ts`; banco `chamados_test` no Postgres do compose; fábricas em `tests/helpers/db.ts`).
 
 ---
 
@@ -31,30 +31,31 @@ Princípios que valem para todas as etapas:
 
 Trello: *[Setup] Criar repositórios*, *[Setup] Configurar CI/CD*, *[Setup] Configurar banco (Prisma + migrations)*, *[Setup] Conectar Vercel e Railway* (Railway → Render).
 
-## Etapa 1 — Autenticação (Clerk) e `/me`
+## Etapa 1 — Autenticação (Clerk) e `/me` ✅
 
 Pré-requisito: chaves do Clerk no `.env` ([docs/clerk-setup.md](docs/clerk-setup.md)).
 
-- [ ] `clerkMiddleware({ authorizedParties })` no router `/api` (depois do health)
-- [ ] Middleware `carregarUsuario`: busca por `clerk_user_id`; no 1º login casa pelo **e-mail verificado** (`clerkClient.users.getUser`) e grava o `clerk_user_id`; usuário `ativo = false` → 403
-- [ ] `exigirPerfil(...perfis)` e helper de escopo (`condominioIds` do usuário; ADMIN = todos)
-- [ ] `GET /me` → `Me` (perfil, condomínios, `prestador { id, status, categoriaIds }`); **404** se não houver linha em `usuarios`
-- [ ] `POST /prestadores/cadastro` (só Clerk sem vínculo): cria `usuarios(PRESTADOR)` + `prestadores(PENDENTE)` + categorias; valida CPF/CNPJ e telefone E.164; exige `emiteNotaFiscal` informado
-- [ ] `GET /categorias` (TI só para ADMIN)
-- [ ] Testes: sem token → 401; 1º login vincula por e-mail; e-mail não verificado não vincula; 404 no `/me`
+- [x] `clerkMiddleware({ authorizedParties })` no router `/api` (depois do health) — `src/lib/clerk.ts`
+- [x] Middleware `autenticar` (antigo `carregarUsuario`): busca por `clerk_user_id`; no 1º login casa pelo **e-mail verificado** e grava o `clerk_user_id`; conta desativada → 403 (`exigirConta`)
+- [x] `exigirPerfil(...perfis)` e escopo do perfil ativo (`req.ctx.condominioIds`; ADMIN = `null` = todos), perfil ativo pelo `X-Perfil`; CORS libera o cabeçalho
+- [x] `GET /me` → `MeApi` (`administradora`, `vinculos`, `condominiosAdministrados`, `prestador`); **404** sem cadastro; **403** desativado
+- [x] `POST /prestadores/cadastro`: cria conta (e-mail verificado) + `prestadores(PENDENTE)` + tipos de serviço; valida CPF/CNPJ (dígitos verificadores) e celular; exige `emiteNotaFiscal` informado; recusa tipo de uso interno
+- [x] `GET /categorias` (`?todas=1`; qualquer sessão, inclusive sem cadastro — o front filtra o que cada perfil pode abrir; a regra de abertura fica no `POST /ordens`)
+- [x] Testes (`tests/auth.test.ts`, banco `chamados_test`): sem token → 401; 1º login vincula por e-mail; e-mail não verificado não vincula; 404/403 no `/me`; `X-Perfil`; autocadastro
 
 Destrava no front: login real, `MeGate`, `/cadastro/prestador`.
 Trello: todos os cards *[Auth]* e *[Back] Endpoints de cadastro e login…* — **substituídos por Clerk** (sem JWT/bcrypt próprios, sem login por celular).
 
-## Etapa 2 — Administração (condomínios, usuários, prestadores)
+## Etapa 2 — Administração (condomínios, pessoas, tipos de serviço, prestadores) ✅
 
-- [ ] `GET/POST/PATCH /condominios` (ADMIN); latitude/longitude manuais ou geocodificação (Nominatim, 1 req/s, com `User-Agent`) — opcional
-- [ ] `GET/POST/PATCH /usuarios` (ADMIN): pré-cadastro de SINDICO/FISCAL/ZELADOR/ADMIN por e-mail + vínculos com condomínios; desativar em vez de apagar
-- [ ] `GET /prestadores` (ADMIN, SINDICO): filtros categoria/status/busca, paginado
-- [ ] `GET /prestadores/:id` com avaliações (sem identificar o condomínio avaliador)
-- [ ] `PATCH /prestadores/:id/aprovar` (exige `emiteNotaFiscal = true`) e `/bloquear` (motivo obrigatório); reversíveis
-- [ ] `PATCH /prestadores/me` (PRESTADOR edita telefone, categorias, área)
-- [ ] **(front)** telas `/admin/usuarios`, `/admin/condominios`, `/prestadores` (hoje placeholders)
+- [x] `GET/POST/PATCH /condominios` (+ `GET /condominios/:id`), com aprovador validado (409 `APROVADOR_INVALIDO`, `CNPJ_DUPLICADO`). Geocodificação fica no front (Nominatim)
+- [x] `GET/POST/PATCH /pessoas` (+ `GET /pessoas/:id`): pré-cadastro por e-mail + vínculos condomínio/perfil; soft delete; 409 `EMAIL_DUPLICADO`, `SEM_ACESSO`, `PESSOA_E_APROVADORA`, `PROPRIA_CONTA`
+- [x] `GET /prestadores` (ADMIN, SINDICO): filtros `categoriaId`/`situacao`/`busca`; array sem paginação (o front pagina na tela)
+- [x] `GET /prestadores/:id` (`totalServicos` derivado). Avaliações/histórico ficam no `GET /prestadores/:id/historico` (Etapa 7)
+- [x] `POST/PATCH /prestadores` (administradora; já `APROVADO`), `PATCH /:id/aprovar` (exige nota fiscal), `/desativar` (`motivo` opcional, como o front), `/reativar`
+- [x] `GET/PATCH /prestadores/me` (PRESTADOR; documento e e-mail só a administradora muda)
+- [x] **(front)** telas de cadastros (já feitas no mock)
+- [x] Testes (`tests/cadastros.test.ts`)
 
 Trello: *[Prestadores] Aprovar ou bloquear*, *[Prestadores] Busca/filtro*, *[Back] Endpoints de aprovação/bloqueio*, *[Back] Endpoints de busca/filtro*, *[Back] Endpoint "emite nota fiscal"*, *[Front] Tela de aprovação/bloqueio*, *[Front] Tela de listagem de prestadores*.
 
@@ -158,18 +159,18 @@ O front já está com o fluxo completo no mock: o contrato é `front/lib/service
 
 - [x] **"Chamado" → "Ordem de serviço"** em tudo: model `Ordem` (tabela `ordens_servico`), rotas `/api/ordens`, enums `StatusOrdem`, campos `ordem_id`, docs e diagrama
 - [x] **Perfil por vínculo:** tirar `usuarios.perfil`; `vinculos_condominio` ganha `perfil` (SINDICO/FISCAL/ZELADOR, um por condomínio); `usuarios.administradora boolean`; `usuarios.ativo`. `GET /me` devolve `{ administradora, vinculos[{ condominio, perfil }], condominiosAdministrados?, prestador? }`
-- [ ] **Perfil ativo** (Etapa 1): cabeçalho `X-Perfil` define o escopo das listagens; a autorização de cada ação continua pelo vínculo da pessoa no condomínio da OS
+- [x] **Perfil ativo** (Etapa 1): cabeçalho `X-Perfil` define o escopo das listagens; a autorização de cada ação continua pelo vínculo da pessoa no condomínio da OS
 - [x] **Aprovador por condomínio** (coluna; validações no service da Etapa 2): `condominios.aprovador_id` (nullable = administradora aprova). Validar que é pessoa ativa vinculada; impedir desativar/desvincular quem é aprovador (409 `PESSOA_E_APROVADORA`)
 - [ ] (Etapa 6) Aprovar/reprovar por **quem é o aprovador** (não mais "SINDICO"); quando a aprovadora é a administradora, `POST /ordens/:id/aprovar` vale direto de `ABERTO`
 - [x] **Tipos de serviço** (colunas; CRUD na Etapa 2): `categorias` com `zelador_pode_abrir`, `interna`, `ativa`; CRUD `GET/POST/PATCH /categorias` (+ `?todas=1`, `GET /categorias/uso`)
 - [x] **Vários tipos por ordem de serviço:** tabela `ordem_categorias` (N:N). Mural: OS com **qualquer** tipo atendido pelo prestador
 - [x] **Nota fiscal** (colunas e tipo de anexo; rotas nas Etapas 4 e 6): `ordens.exige_nota_fiscal`; anexos `NOTA_FISCAL` via `POST /ordens/:id/notas-fiscais` (prestador da proposta aceita); conclusão recusa com 409 `NOTA_FISCAL_PENDENTE`
 - [x] **Comprovante de pagamento** (tipo de anexo; rota na Etapa 6): anexo `PAGAMENTO` obrigatório em `PATCH /ordens/:id/concluir` (multipart `comprovantes`); visível ao prestador
-- [ ] **Pessoas** (Etapa 2; colunas prontas): CRUD `GET/POST/PATCH /pessoas` (e-mail único, vínculos, `contaCriada` = `clerk_user_id` preenchido); soft delete
+- [x] **Pessoas** (Etapa 2): CRUD `GET/POST/PATCH /pessoas` (e-mail único, vínculos, `contaCriada` = `clerk_user_id` preenchido); soft delete
 - [x] **Prestadores** (colunas; rotas na Etapa 2): `nome_contato` e `email` ficam na conta (`usuarios.nome`/`usuarios.email`), `origem` (AUTOCADASTRO/ADMINISTRADORA), `ativo`, `motivo_inativacao`; status só `PENDENTE`/`APROVADO` (o antigo `BLOQUEADO` vira `ativo = false`). Rotas: `GET/POST/PATCH /prestadores`, `/:id/aprovar`, `/:id/desativar`, `/:id/reativar`, `GET/PATCH /prestadores/me`. Cadastro pela administradora já entra `APROVADO` e casa com a conta pelo e-mail no 1º login (igual às pessoas)
 - [x] **Condomínios** (colunas; CRUD na Etapa 2): `uf`, `ativo`; CRUD com aprovador
 - [x] Eventos novos: `NOTA_FISCAL_ENVIADA`; texto de conclusão citando o comprovante
-- [ ] (Etapa 1) `GET /me` responde **403** para pessoa ou prestador desativado (o front mostra "acesso desativado")
+- [x] (Etapa 1) `GET /me` responde **403** para pessoa ou prestador desativado (o front mostra "acesso desativado")
 
 ## Fora de escopo da v1 (cards do Trello que não viram tarefa)
 
