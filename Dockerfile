@@ -16,7 +16,9 @@ RUN npm ci && npx prisma generate
 FROM deps AS dev
 ENV NODE_ENV=development
 EXPOSE 3333
-CMD ["npm", "run", "dev"]
+# Gera o Prisma Client a cada início: o node_modules do contêiner é separado do host
+# e ficaria com o schema antigo depois de uma migration nova.
+CMD ["sh", "-c", "npx prisma generate && npm run dev"]
 
 # ── Build ──
 FROM deps AS build

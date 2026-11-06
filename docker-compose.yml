@@ -1,5 +1,5 @@
 # Somente ambiente local. Em produção o banco é o Supabase.
-# Anexos não rodam local: em dev a API usa um projeto Supabase de desenvolvimento (bucket "anexos").
+# Anexos não rodam local: em dev a API usa o Supabase (bucket "anexos-dev").
 #
 #   docker compose up -d        # banco + API com hot reload (http://localhost:3333/api)
 #   docker compose up -d db     # só o banco; rode a API no host com `npm run dev`
