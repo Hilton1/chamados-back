@@ -109,8 +109,8 @@ Trello: *[Seleção] Comparar*, *Aceitar proposta vencedora*, *Gerar link de Wha
 
 ## Etapa 7 — Avaliação e reputação
 
-- [ ] `POST /chamados/:id/avaliacao` (ADMIN, SINDICO; só `CONCLUIDO`; 1 por chamado): nota 1–5 + comentário; atualiza `mediaAvaliacao`/`totalAvaliacoes` **na mesma transação**; evento `AVALIADO`
-- [ ] `GET /prestadores/:id/historico` → `HistoricoPrestador` (prazo cumprido derivado)
+- [x] `POST /ordens/:id/avaliacao` (gestores; só `CONCLUIDO`; 1 por ordem → 409 `JA_AVALIADA`): nota 1–5 + comentário; recalcula `mediaAvaliacao`/`totalAvaliacoes` **na mesma transação**; evento `AVALIADO`
+- [x] `GET /prestadores/:id/historico` → `HistoricoPrestador` (por tipo de serviço, prazo cumprido derivado, último serviço)
 - [ ] Avaliações visíveis a qualquer síndico/admin **sem** identificar o condomínio **(PO)**
 
 Trello: *[Avaliação] Registrar*, *Calcular média*, *Exibir histórico*, *[Avaliações] Compartilhadas entre condomínios*, *[Back] Endpoints de avaliação*, *[Back] Avaliações cruzadas* — com **nota geral única** (não 3 critérios).

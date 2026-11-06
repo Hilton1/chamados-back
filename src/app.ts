@@ -14,6 +14,7 @@ import {
 import { condominiosRoutes } from "./modules/condominios/condominios.routes.js";
 import { healthRoutes } from "./modules/health/health.routes.js";
 import { anexosRoutes } from "./modules/anexos/anexos.routes.js";
+import { avaliacoesRoutes } from "./modules/avaliacoes/avaliacoes.routes.js";
 import { meRoutes } from "./modules/me/me.routes.js";
 import { ordensRoutes } from "./modules/ordens/ordens.routes.js";
 import { propostasRoutes } from "./modules/propostas/propostas.routes.js";
@@ -54,6 +55,7 @@ export function criarApp() {
     ordensRoutes,
     propostasRoutes,
     anexosRoutes,
+    avaliacoesRoutes,
   );
 
   app.use("/api", api);

@@ -213,23 +213,25 @@ Prefixo `/api`. Toda rota exige sessão Clerk, exceto `GET /api/health` (consult
 | `GET /prestadores` (`busca`, `categoriaId`, `situacao=PENDENTE\|ATIVO\|INATIVO`), `GET /prestadores/:id` | ADMIN, SINDICO | Lista (array, sem paginação, como o front espera: pendentes, ativos, inativos) e detalhe |
 | `POST /prestadores`, `PATCH /prestadores/:id` | ADMIN | Cadastro pela administradora (já `APROVADO`) e edição |
 | `PATCH /prestadores/:id/aprovar` · `/desativar` (`{ motivo? }`) · `/reativar` | ADMIN | Aprovar exige nota fiscal. Documento novo precisa ter dígitos verificadores válidos; o já gravado é mantido |
-| `GET /prestadores/:id/historico` | ADMIN, SINDICO | `{ media, totalServicos, porCategoria[], prazoCumprido, ultimoServicoEm }`. Prazo cumprido = `concluido_em <= disponivel_em + tempo_execucao_horas` da proposta aceita |
-| `POST /ordens` · `GET /ordens` · `GET /ordens/:id` | conforme seção 3 | Abrir (`categoriaIds[]`, `exigeNotaFiscal`, `prazoUrgenteHoras?`), listar com escopo do perfil ativo (urgentes primeiro; `totalPropostas`, `menorValor`, `valorContratado`), detalhar (`localizacao` filtrada, `eventos`, anexos com URL assinada, `minhaProposta` para prestador) |
-| `POST /ordens/:id/anexos` · `/formularios` | quem abriu | Fotos (JPG/PNG, máx. 6) e formulário (PDF/DOCX/XLSX, enquanto `ABERTO` e sem propostas); 1 arquivo por requisição |
-| `POST /ordens/:id/comprovacoes` · `/notas-fiscais` | prestador da proposta `ACEITA` | JPG/PNG/PDF |
+| `GET /prestadores/:id/historico` | ADMIN, SINDICO, FISCAL, ZELADOR (o aprovador pode ter qualquer perfil) | `{ media, totalServicos, porCategoria[], prazoCumprido, ultimoServicoEm }`. Prazo cumprido = `concluido_em <= disponivel_em + tempo_execucao_horas` da proposta aceita |
+| `POST /ordens` · `GET /ordens` · `GET /ordens/:id` | conforme seção 3 (lista: só perfis internos; detalhe: também o prestador) | Abrir (`categoriaIds[]`, `exigeNotaFiscal`, `prazoUrgenteHoras?`), listar com escopo do perfil ativo (`status`, `urgencia`, `categoriaId`, `busca`; **array**, o front pagina; urgentes primeiro; `totalPropostas`, `menorValor`, `valorContratado`), detalhar (`localizacao` filtrada, `eventos`, anexos com URL assinada, `minhaProposta` para prestador). Fora do escopo → 404 |
+| `GET /ordens/:id/propostas` | gestores | Propostas para comparação (prestador com média, nº de avaliações e de serviços) |
+| `POST /ordens/:id/anexos` · `/formularios` | quem abriu (formulário: menos zelador) | Campo `arquivo`. Fotos (JPG/PNG, máx. 6, enquanto `ABERTO`) e formulário (PDF/DOCX/XLSX, máx. 3, antes da 1ª proposta); 1 arquivo por requisição |
+| `POST /ordens/:id/comprovacoes` · `/notas-fiscais` | prestador da proposta `ACEITA` | Campo `arquivo`, JPG/PNG/PDF. Comprovação em `EM_EXECUCAO`/`CONCLUIDO`; NF em `EM_EXECUCAO` |
 | `POST /ordens/:id/transferir` | ADMIN | `{ propostaId }` → `AGUARDANDO_APROVACAO` |
 | `POST /ordens/:id/aprovar` · `/reprovar` | aprovador (ou ADMIN se o condomínio não tem aprovador) | `{ propostaId }` / `{ propostaId, motivo? }` |
 | `PATCH /ordens/:id/concluir` (multipart `comprovantes`) · `/cancelar` | gestores | Concluir exige comprovante de pagamento e, se exigida, a NF |
 | `POST /ordens/:id/avaliacao` | gestores | `{ nota, comentario? }` |
 | `GET /ordens/:id/whatsapp` | gestores | `{ url }` `wa.me` com mensagem pronta |
 | `GET /mural` | PRESTADOR | Ordens abertas de qualquer tipo que ele atende |
-| `POST /ordens/:id/propostas` | PRESTADOR | Upsert, `multipart/form-data` (campos + `arquivos`) |
+| `POST /ordens/:id/propostas` | PRESTADOR (APROVADO e ativo) | Upsert, `multipart/form-data` (campos + `arquivos`, até 5); devolve a ordem na visão do prestador |
 | `PATCH /propostas/:id/cancelar` | PRESTADOR | Antes de `TRANSFERIDA/ACEITA` |
 | `GET /propostas/minhas` | PRESTADOR | Em andamento / aguardando / encerradas |
 
 Transferir/aprovar/reprovar/concluir/cancelar/avaliar devolvem a `Ordem` atualizada (o front usa o retorno).
 Erros: JSON `{ erro: { codigo, mensagem } }` com status HTTP correto (400 validação, 401, 403 perfil/escopo, 404, 409 regra de negócio).
 Códigos em uso: `NAO_AUTENTICADO`, `SEM_CADASTRO`, `ACESSO_DESATIVADO`, `SEM_ACESSO`, `PERFIL_SEM_PERMISSAO`, `VALIDACAO`, `NAO_ENCONTRADO`, `CATEGORIA_DUPLICADA`, `CATEGORIA_INVALIDA`, `APROVADOR_INVALIDO`, `CNPJ_DUPLICADO`, `CONDOMINIO_INVALIDO`, `EMAIL_DUPLICADO`, `PESSOA_E_APROVADORA`, `PROPRIA_CONTA`, `DOCUMENTO_DUPLICADO`, `DOCUMENTO_INVALIDO`, `SEM_NOTA_FISCAL`, `JA_CADASTRADO`, `EMAIL_NAO_VERIFICADO`.
+Ordens/propostas/anexos: `SEM_TIPO`, `TIPO_NAO_PERMITIDO`, `CONDOMINIO_INATIVO`, `TRANSICAO_INVALIDA`, `ORDEM_ALTERADA` (corrida), `PRESTADOR_NAO_APROVADO`, `TIPO_NAO_ATENDIDO`, `PROPOSTAS_ENCERRADAS`, `PRAZO_ENCERRADO`, `PROPOSTA_BLOQUEADA`, `PROPOSTA_INVALIDA`, `PROPOSTA_NAO_TRANSFERIDA`, `FORMULARIO_OBRIGATORIO`, `FORMULARIO_BLOQUEADO`, `ADMINISTRADORA_APROVA`, `NAO_E_APROVADOR`, `SEM_PROPOSTA_APROVADA`, `NOTA_FISCAL_PENDENTE`, `PAGAMENTO_PENDENTE`, `JA_AVALIADA`, `ORDEM_FECHADA`, `LIMITE_DE_ARQUIVOS`, `ARQUIVO_OBRIGATORIO`, `ARQUIVO_GRANDE` (413), `ARQUIVOS_DEMAIS`, `TIPO_DE_ARQUIVO_INVALIDO` (415).
 Telefones são aceitos com ou sem máscara/`+55` e gravados só com dígitos (`5582999990001`).
 
 ## 9. Fora de escopo (v1)
@@ -248,7 +250,8 @@ src/
   middlewares/             # erro (AppError), auth (clerk + carregarUsuario), exigirPerfil, upload
   lib/                     # prisma.ts, logger.ts, storage/ (supabase | s3), whatsapp.ts
   modules/health/          # GET /api/health
-  modules/<dominio>/       # me, ordens, propostas, mural, prestadores, pessoas, condominios, categorias
+  modules/<dominio>/       # me, ordens (+ estado.ts, ordens.escopo.ts, decisao.service.ts), propostas (mural),
+                           # anexos, avaliacoes, prestadores, pessoas, condominios, categorias
     <dominio>.routes.ts    # rotas + validação Zod
     <dominio>.controller.ts# HTTP apenas
     <dominio>.service.ts   # regra de negócio + escopo (condominio_id)
