@@ -48,7 +48,8 @@ async function urlAssinada(path: string): Promise<string | undefined> {
   try {
     return await storage().signedUrl(path);
   } catch (err) {
-    logger.warn({ err, path }, "não foi possível assinar a URL do anexo");
+    const motivo = err instanceof Error ? err.message : String(err);
+    logger.warn({ path, motivo }, "não foi possível assinar a URL do anexo");
     return undefined;
   }
 }
