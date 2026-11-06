@@ -1,0 +1,36 @@
+# Blueprint do Render (New → Blueprint → aponte para este repositório).
+# Usa a imagem de produção do Dockerfile, então o mesmo deploy serve para Koyeb, Northflank ou Cloud Run.
+# Passo a passo e valores das variáveis: docs/deploy.md
+services:
+  - type: web
+    name: chamados-api
+    runtime: docker
+    plan: free
+    region: virginia # mesma região (EUA-Leste) do projeto Supabase, para o banco ficar perto da API
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    # O deploy é disparado pelo GitHub Actions DEPOIS das migrations (Deploy Hook), não a cada push.
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: STORAGE_DRIVER
+        value: supabase
+      - key: STORAGE_BUCKET
+        value: anexos
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false

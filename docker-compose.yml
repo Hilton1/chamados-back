@@ -1,0 +1,46 @@
+# Somente ambiente local. Em produção o banco é o Supabase.
+# Anexos não rodam local: em dev a API usa um projeto Supabase de desenvolvimento (bucket "anexos").
+#
+#   docker compose up -d        # banco + API com hot reload (http://localhost:3333/api)
+#   docker compose up -d db     # só o banco; rode a API no host com `npm run dev`
+#
+# Lê o .env (copie do .env.example). As URLs abaixo sobrescrevem as do .env só dentro do contêiner.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: chamados-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-chamados}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-chamados}
+      POSTGRES_DB: ${DB_NAME:-chamados}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-chamados} -d ${DB_NAME:-chamados}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      target: dev
+    container_name: chamados-api
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-chamados}:${DB_PASSWORD:-chamados}@db:5432/${DB_NAME:-chamados}
+      DIRECT_URL: postgresql://${DB_USER:-chamados}:${DB_PASSWORD:-chamados}@db:5432/${DB_NAME:-chamados}
+    ports:
+      - "${PORT:-3333}:3333"
+    volumes:
+      - .:/app
+      - /app/node_modules # mantém o node_modules do contêiner (não o do host)
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

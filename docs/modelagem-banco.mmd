@@ -1,0 +1,131 @@
+erDiagram
+  CONDOMINIOS ||--o{ VINCULOS_CONDOMINIO : "escopo de acesso"
+  USUARIOS ||--o{ VINCULOS_CONDOMINIO : possui
+  USUARIOS ||--o| PRESTADORES : "perfil PRESTADOR"
+  USUARIOS ||--o{ PRESTADORES : "aprova (admin)"
+  CATEGORIAS ||--o{ PRESTADOR_CATEGORIAS : "especialidade"
+  PRESTADORES ||--o{ PRESTADOR_CATEGORIAS : atende
+  CONDOMINIOS ||--o{ CHAMADOS : possui
+  CATEGORIAS ||--o{ CHAMADOS : classifica
+  USUARIOS ||--o{ CHAMADOS : abre
+  USUARIOS ||--o{ CHAMADOS : "aprova (sindico)"
+  CHAMADOS ||--o{ ANEXOS : tem
+  PROPOSTAS ||--o{ ANEXOS : "arquivos da proposta"
+  USUARIOS ||--o{ ANEXOS : envia
+  CHAMADOS ||--o{ CHAMADO_EVENTOS : "linha do tempo"
+  USUARIOS ||--o{ CHAMADO_EVENTOS : "autor"
+  CHAMADOS ||--o{ PROPOSTAS : recebe
+  PRESTADORES ||--o{ PROPOSTAS : envia
+  USUARIOS ||--o{ PROPOSTAS : "transfere (admin)"
+  CHAMADOS ||--o| AVALIACOES : gera
+  PRESTADORES ||--o{ AVALIACOES : recebe
+  USUARIOS ||--o{ AVALIACOES : avalia
+
+  CONDOMINIOS {
+    uuid id PK
+    string nome
+    string cnpj UK
+    string endereco
+    string bairro
+    string cidade
+    char2 uf
+    decimal latitude "mapa"
+    decimal longitude "mapa"
+    bool ativo
+  }
+  USUARIOS {
+    uuid id PK
+    string clerk_user_id UK "null ate o 1o login"
+    string nome
+    string email UK
+    string telefone
+    enum perfil "ADMIN SINDICO FISCAL ZELADOR PRESTADOR"
+    bool ativo
+  }
+  VINCULOS_CONDOMINIO {
+    uuid usuario_id PK,FK
+    uuid condominio_id PK,FK
+  }
+  CATEGORIAS {
+    uuid id PK
+    string slug UK
+    string nome
+    bool interna "TI = uso interno"
+    bool ativa
+  }
+  PRESTADORES {
+    uuid id PK
+    uuid usuario_id UK,FK
+    string razao_social
+    string documento UK "CPF ou CNPJ"
+    string telefone_whatsapp "E.164"
+    bool emite_nota_fiscal
+    string area_atuacao
+    enum status "PENDENTE APROVADO BLOQUEADO"
+    uuid aprovado_por_id FK
+    datetime aprovado_em
+    string motivo_bloqueio
+    decimal media_avaliacao "desnormalizado"
+    int total_avaliacoes "desnormalizado"
+  }
+  PRESTADOR_CATEGORIAS {
+    uuid prestador_id PK,FK
+    uuid categoria_id PK,FK
+  }
+  CHAMADOS {
+    uuid id PK
+    int numero UK "protocolo"
+    uuid condominio_id FK
+    uuid categoria_id FK
+    uuid criado_por_id FK
+    string titulo
+    text descricao
+    string local
+    enum urgencia "NORMAL URGENTE"
+    enum status "ABERTO AGUARDANDO_APROVACAO EM_EXECUCAO CONCLUIDO CANCELADO"
+    datetime prazo_propostas_ate
+    uuid aprovado_por_id FK
+    datetime aprovado_em
+    datetime concluido_em
+    datetime cancelado_em
+    string motivo_cancelamento
+  }
+  ANEXOS {
+    uuid id PK
+    uuid chamado_id FK
+    uuid proposta_id FK "so no tipo PROPOSTA"
+    enum tipo "ABERTURA FORMULARIO PROPOSTA COMPROVACAO"
+    uuid enviado_por_id FK
+    string nome_original
+    string storage_path
+    string mime_type "jpeg png pdf docx xlsx"
+    int tamanho_bytes
+  }
+  CHAMADO_EVENTOS {
+    uuid id PK
+    uuid chamado_id FK
+    enum tipo "ABERTO PROPOSTA_RECEBIDA TRANSFERIDA APROVADA REPROVADA COMPROVACAO_ENVIADA CONCLUIDO CANCELADO AVALIADO"
+    uuid autor_id FK "null = sistema"
+    string texto
+    bool marco "destaque na tela"
+  }
+  PROPOSTAS {
+    uuid id PK
+    uuid chamado_id FK
+    uuid prestador_id FK
+    decimal valor
+    datetime disponivel_em
+    int tempo_execucao_horas
+    string observacao
+    enum status "ENVIADA TRANSFERIDA ACEITA RECUSADA CANCELADA"
+    string motivo_recusa "reprovacao do sindico"
+    uuid transferida_por_id FK
+  }
+  AVALIACOES {
+    uuid id PK
+    uuid chamado_id UK,FK
+    uuid prestador_id FK
+    uuid avaliador_id FK
+    smallint nota "1 a 5"
+    string comentario
+  }

@@ -1,0 +1,18 @@
+# Opcional. Chama /api/health a cada 10 min para o Render free não dormir (cold start ~1 min) e o
+# Supabase free não pausar (pausa após 7 dias sem uso). Só roda se a variável do repositório
+# API_HEALTH_URL existir (Settings → Secrets and variables → Actions → Variables),
+# ex.: https://chamados-api.onrender.com/api/health
+# Obs.: o GitHub desativa workflows agendados após 60 dias sem commits no repositório.
+name: Manter API acordada
+
+on:
+  schedule:
+    - cron: "*/10 10-23 * * *" # 07h–20h59 no horário de Brasília (UTC-3)
+  workflow_dispatch:
+
+jobs:
+  ping:
+    if: vars.API_HEALTH_URL != ''
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS --retry 3 --retry-delay 20 --max-time 90 "${{ vars.API_HEALTH_URL }}"
