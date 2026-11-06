@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import type { Prisma, TipoAnexo } from "@prisma/client";
 import { logger } from "../../lib/logger.js";
+import { AppError } from "../../middlewares/erro.js";
 import { caminhoAnexo, storage, type PastaAnexo } from "../../lib/storage/index.js";
 import type { ArquivoValidado } from "../../middlewares/upload.js";
 
@@ -19,7 +20,16 @@ export interface ArquivoEnviado extends ArquivoValidado {
   path: string;
 }
 
-/** Sobe os arquivos; se algum falhar, remove os que já subiram e repassa o erro. */
+/** Falha do provedor de arquivos (Supabase/S3 fora do ar, credencial ausente…): 503 amigável. */
+const storageIndisponivel = (causa: unknown) =>
+  new AppError(
+    503,
+    "ARMAZENAMENTO_INDISPONIVEL",
+    "Não foi possível salvar o arquivo agora. Tente novamente em instantes.",
+    causa,
+  );
+
+/** Sobe os arquivos; se algum falhar, remove os que já subiram e responde 503. */
 export async function subirArquivos(
   ordemId: string,
   tipo: TipoAnexo,
@@ -37,7 +47,7 @@ export async function subirArquivos(
     return enviados;
   } catch (err) {
     await removerArquivos(enviados.map((e) => e.path));
-    throw err;
+    throw err instanceof AppError ? err : storageIndisponivel(err);
   }
 }
 

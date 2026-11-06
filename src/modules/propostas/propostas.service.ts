@@ -159,7 +159,8 @@ export async function cancelar(ctx: Contexto, propostaId: string) {
       where: { id: p.id, status: "ENVIADA" },
       data: { status: "CANCELADA" },
     });
-    if (count === 0) throw conflito("PROPOSTA_BLOQUEADA", "A proposta mudou de situação.");
+    if (count === 0)
+      throw conflito("PROPOSTA_BLOQUEADA", "A proposta mudou de situação. Atualize a página.");
     await registrarEvento(tx, p.ordemId, {
       tipo: "PROPOSTA_RECEBIDA",
       texto: `${ctx.usuario.prestador!.razaoSocial} cancelou a proposta`,

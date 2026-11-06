@@ -53,7 +53,10 @@ export async function enviarFoto(ctx: Contexto, id: string, arquivos: ArquivoVal
   const o = await carregarOrdem(ctx, id);
   exigirQuemAbriu(ctx, o);
   if (o.status !== "ABERTO")
-    throw conflito("ORDEM_FECHADA", "Só dá para anexar fotos enquanto recebe propostas.");
+    throw conflito(
+      "ORDEM_FECHADA",
+      "Só dá para anexar fotos enquanto a ordem de serviço recebe propostas.",
+    );
   if (contar(o, "ABERTURA") + arquivos.length > MAX_FOTOS)
     throw conflito("LIMITE_DE_ARQUIVOS", `Até ${MAX_FOTOS} fotos por ordem de serviço.`);
   return anexar(ctx, o, "ABERTURA", arquivos);

@@ -2,8 +2,9 @@
 // Os tipos aceitos por TipoAnexo são os mesmos do CHECK `anexos_mime_por_tipo_chk` da migration.
 import type { TipoAnexo } from "@prisma/client";
 import { fileTypeFromBuffer } from "file-type";
-import multer from "multer";
-import { AppError } from "./erro.js";
+import type { RequestHandler } from "express";
+import multer, { MulterError } from "multer";
+import { AppError, traduzirMulter } from "./erro.js";
 
 export const TAMANHO_MAXIMO = 5 * 1024 * 1024;
 
@@ -45,10 +46,32 @@ const multerMemoria = (maxArquivos: number) =>
     limits: { fileSize: TAMANHO_MAXIMO, files: maxArquivos, fields: 20 },
   });
 
+/**
+ * Traduz os erros do multer com o limite e o campo da rota ("Envie no máximo 5 arquivos por vez.").
+ * Erro que não é do multer (multipart malformado, conexão interrompida) vira 400.
+ */
+const comErrosTraduzidos =
+  (m: RequestHandler, campo: string, max: number): RequestHandler =>
+  (req, res, next) =>
+    m(req, res, (err?: unknown) => {
+      if (!err) return next();
+      if (err instanceof MulterError) return next(traduzirMulter(err, max, campo));
+      if (err instanceof AppError) return next(err);
+      next(
+        new AppError(
+          400,
+          "UPLOAD_INVALIDO",
+          "Não foi possível ler os arquivos enviados. Tente enviar novamente.",
+          err,
+        ),
+      );
+    });
+
 /** Um arquivo no campo `arquivo` (o front manda um por requisição). */
-export const umArquivo = multerMemoria(1).single("arquivo");
+export const umArquivo = comErrosTraduzidos(multerMemoria(1).single("arquivo"), "arquivo", 1);
 /** Vários arquivos num campo (ex.: `arquivos` da proposta, `comprovantes` da conclusão). */
-export const variosArquivos = (campo: string, max: number) => multerMemoria(max).array(campo, max);
+export const variosArquivos = (campo: string, max: number) =>
+  comErrosTraduzidos(multerMemoria(max).array(campo, max), campo, max);
 
 export interface ArquivoValidado {
   nome: string;

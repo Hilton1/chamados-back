@@ -39,7 +39,10 @@ export async function listarPropostas(ctx: Contexto, id: string) {
 export async function transferir(ctx: Contexto, id: string, propostaId: string) {
   const o = await carregarOrdem(ctx, id);
   if (o.status !== "ABERTO")
-    throw conflito("TRANSICAO_INVALIDA", "Só dá para transferir enquanto recebe propostas.");
+    throw conflito(
+      "TRANSICAO_INVALIDA",
+      "Só dá para transferir enquanto a ordem de serviço recebe propostas.",
+    );
   if (!o.condominio.aprovador)
     throw conflito(
       "ADMINISTRADORA_APROVA",

@@ -21,7 +21,7 @@ const receber =
     const id = idParam.parse(req.params).id;
     const recebidos = arquivosDa(req);
     if (obrigatorio && recebidos.length === 0)
-      throw new AppError(400, "ARQUIVO_OBRIGATORIO", "Envie o arquivo.");
+      throw new AppError(400, "ARQUIVO_OBRIGATORIO", "Selecione um arquivo para enviar.");
     res.json(await acao(ctx(req), id, await validarArquivos(recebidos, tipo)));
   };
 

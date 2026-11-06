@@ -28,7 +28,8 @@ export const obter = async (id: string) => serializarPessoa(await buscar(id));
 
 async function validar(input: PessoaInput, id?: string) {
   if (!input.administradora && input.vinculos.length === 0)
-    throw conflito(
+    throw new AppError(
+      400,
       "SEM_ACESSO",
       "Vincule a pessoa a pelo menos um condomínio ou marque que ela é da administradora.",
     );

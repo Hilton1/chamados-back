@@ -69,7 +69,15 @@ async function carregarConta(clerkUserId: string): Promise<Conta | null> {
 
 export const autenticar: RequestHandler = async (req, _res, next) => {
   const userId = idClerk(req);
-  if (!userId) throw new AppError(401, "NAO_AUTENTICADO", "Faça login para continuar.");
+  if (!userId)
+    throw new AppError(
+      401,
+      "NAO_AUTENTICADO",
+      // Com token que o Clerk não aceitou (vencido, revogado, de outra origem) = sessão expirada.
+      req.get("authorization")
+        ? "Sua sessão expirou. Entre novamente."
+        : "Faça login para continuar.",
+    );
   req.clerkUserId = userId;
   req.conta = await carregarConta(userId);
   next();

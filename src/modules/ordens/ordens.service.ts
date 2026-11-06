@@ -60,11 +60,19 @@ export async function criar(ctx: Contexto, input: NovaOrdemInput) {
   if (!condominio || !noEscopo)
     throw new AppError(403, "CONDOMINIO_INVALIDO", "Você não atua neste condomínio.");
   if (!condominio.ativo)
-    throw new AppError(409, "CONDOMINIO_INATIVO", "Este condomínio está inativo.");
+    throw new AppError(
+      409,
+      "CONDOMINIO_INATIVO",
+      "Este condomínio está inativo: não dá para abrir ordens de serviço nele.",
+    );
 
   const categorias = await prisma.categoria.findMany({ where: { id: { in: input.categoriaIds } } });
   if (categorias.length !== input.categoriaIds.length)
-    throw new AppError(409, "SEM_TIPO", "Escolha pelo menos um tipo de serviço válido.");
+    throw new AppError(
+      400,
+      "SEM_TIPO",
+      "Um dos tipos de serviço escolhidos não existe mais. Atualize a página e escolha de novo.",
+    );
   if (categorias.some((c) => !podeAbrirCategoria(ctx.perfil, c)))
     throw new AppError(
       403,

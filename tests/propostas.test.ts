@@ -230,7 +230,8 @@ describe("formulário obrigatório e arquivos da proposta", () => {
     const o = await ordem();
     controle.falharUpload = true;
     const res = await enviar(o.id).attach("arquivos", PNG, "a.png");
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(503);
+    expect(res.body.erro.codigo).toBe("ARMAZENAMENTO_INDISPONIVEL");
     expect(await prisma.proposta.count()).toBe(0);
   });
 });
