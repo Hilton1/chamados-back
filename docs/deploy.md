@@ -22,10 +22,10 @@ GitHub Actions: PR → lint/typecheck/test/build · main → migrate deploy → 
 
    > Use o **Session pooler** no `DIRECT_URL`, não a "Direct connection" (`db.<ref>.supabase.co`): a direta é só IPv6 no plano free, e os runners do GitHub Actions não têm IPv6 — a migration falharia no CI.
 
-4. **Storage → New bucket**: nome `anexos`, **Public: desligado**, *File size limit* 5 MB, *Allowed MIME types* `image/jpeg, image/png, application/pdf`.
-5. **Project Settings → API**: copie `Project URL` (`SUPABASE_URL`) e a chave **service_role** (`SUPABASE_SERVICE_ROLE_KEY`). Essa chave ignora RLS: só no Render/`.env` do back, nunca no front.
+4. **Storage → New bucket**: nome `anexos`, **Public: desligado**, *File size limit* 5 MB, *Allowed MIME types* `image/jpeg, image/png, application/pdf` + DOCX e XLSX (`application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`). Crie também o `anexos-dev` igual.
+5. **Project Settings → API**: copie `Project URL` (`SUPABASE_URL`, **só o domínio**, sem `/rest/v1/`) e a **Secret key** `sb_secret_...` (`SUPABASE_SERVICE_ROLE_KEY`; substitui a antiga service_role). Essa chave ignora RLS: só no Render/`.env` do back, nunca no front.
 
-Para desenvolvimento, crie **um segundo projeto** (ex.: `chamados-dev`) só para o storage, com o mesmo bucket. O banco local continua no Docker.
+**Um projeto Supabase só** serve aos dois ambientes: o banco do Supabase é o de **produção** (dev usa o Postgres do Docker) e o storage tem **dois buckets privados**, `anexos` (produção, `STORAGE_BUCKET=anexos` no Render) e `anexos-dev` (desenvolvimento, `STORAGE_BUCKET=anexos-dev` no `.env` local), assim arquivos de teste não se misturam com os reais. Os dois com limite de 5 MB e tipos JPG, PNG, PDF, DOCX e XLSX.
 
 Limites do free (conferir no painel): 500 MB de banco, 1 GB de storage, **pausa após 7 dias sem uso** (o workflow `manter-acordado` evita isso).
 
